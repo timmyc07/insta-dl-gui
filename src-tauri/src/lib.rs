@@ -324,6 +324,7 @@ pub fn run() {
             commands::resolve_input,
             commands::download_post,
             commands::fetch_profile,
+            commands::fetch_profile_posts_page,
             commands::check_download_statuses,
             commands::enqueue_profile_download,
             commands::enqueue_fetched_post_download,

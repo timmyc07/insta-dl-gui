@@ -6,9 +6,9 @@ Paste a public Instagram post, Reel or carousel link into **Explore** or **Downl
 
 ## Browse an exact username
 
-Enter `@username` or the public profile link in **Explore**. Instagram makes up to six recent posts available through its public profile embed. The **Videos** tab filters those items to individual videos. Use **All** for the available recent items in the tab, **Shown** for the current filter, or **Selected** for items you marked. The **Avatar** button saves the profile picture when available.
+Enter `@username` or the public profile link in **Explore**. The first view loads the recent public embeds. Press **Load more** to append older items from Instagram's public timeline. The **Videos** tab filters the loaded items to individual videos. Use **All** for every loaded downloadable item in the tab, **Shown** for the current filter, or **Selected** for items you marked. The **Avatar** button saves the profile picture when available.
 
-The download scope covers publicly embeddable content. Private content, Stories, Highlights, follower lists and full profile histories require other access.
+The timeline shows the pages Instagram makes available to logged-out visitors. A post marked **Unavailable** does not provide a downloadable public embed. Private content, Stories, Highlights and follower lists require other access.
 
 ## Library
 

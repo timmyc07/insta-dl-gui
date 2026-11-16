@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { reactive, ref } from "vue";
 
-import type { ProfilePreview } from "../lib/ipc";
+import type { ProfilePostsPage, ProfilePreview } from "../lib/ipc";
 
 export type ExploreTab = "posts" | "reels";
 export type PostFilter = "all" | "photos" | "videos" | "carousels";
@@ -13,6 +13,8 @@ export interface ExploreSelectionSnapshot {
 export const useExplorerStore = defineStore("explorer", () => {
   const query = ref("");
   const profilePreview = ref<ProfilePreview | null>(null);
+  const nextCursor = ref<string | null>();
+  const consumedCursors = new Set<string>();
   const activeTab = ref<ExploreTab>("posts");
   const postFilter = ref<PostFilter>("all");
   const selected = reactive<Record<ExploreTab, string[]>>({
@@ -26,6 +28,8 @@ export const useExplorerStore = defineStore("explorer", () => {
   let nextSelectionRevision = 0;
   function beginProfileLoad() {
     profilePreview.value = null;
+    nextCursor.value = undefined;
+    consumedCursors.clear();
     activeTab.value = "posts";
     postFilter.value = "all";
     selected.posts = [];
@@ -36,6 +40,24 @@ export const useExplorerStore = defineStore("explorer", () => {
 
   function commitProfile(value: ProfilePreview) {
     profilePreview.value = value;
+  }
+
+  function appendPostsPage(page: ProfilePostsPage) {
+    if (!profilePreview.value) return;
+    if (nextCursor.value) consumedCursors.add(nextCursor.value);
+    nextCursor.value = page.next_cursor && !consumedCursors.has(page.next_cursor)
+      ? page.next_cursor
+      : null;
+
+    const posts = profilePreview.value.recent_posts;
+    const codes = new Set(posts.map((post) => post.code));
+    const ids = new Set(posts.map((post) => post.pk));
+    for (const post of page.posts) {
+      if (codes.has(post.code) || ids.has(post.pk)) continue;
+      codes.add(post.code);
+      ids.add(post.pk);
+      posts.push(post);
+    }
   }
 
   function toggleSelected(tab: ExploreTab, pk: string) {
@@ -82,11 +104,13 @@ export const useExplorerStore = defineStore("explorer", () => {
   return {
     query,
     profilePreview,
+    nextCursor,
     activeTab,
     postFilter,
     selected,
     beginProfileLoad,
     commitProfile,
+    appendPostsPage,
     toggleSelected,
     isSelected,
     selectionSnapshot,

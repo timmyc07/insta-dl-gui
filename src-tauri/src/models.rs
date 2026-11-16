@@ -25,6 +25,7 @@ pub(crate) enum FetchedPostCategory {
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
 pub(crate) enum FetchedPostScope {
+    All,
     Shown,
     Selected,
 }

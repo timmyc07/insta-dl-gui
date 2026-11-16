@@ -505,6 +505,7 @@ impl FetchedPostCategory {
 impl FetchedPostScope {
     fn as_str(self) -> &'static str {
         match self {
+            Self::All => "all",
             Self::Shown => "shown",
             Self::Selected => "selected",
         }
@@ -1283,6 +1284,20 @@ pub async fn fetch_profile(
         profile,
         recent_posts,
     })
+}
+
+#[tauri::command]
+pub async fn fetch_profile_posts_page(
+    username: String,
+    cursor: Option<String>,
+    shown_codes: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::instagram::TimelinePage, String> {
+    state
+        .instagram_client()
+        .await
+        .timeline(username.trim(), cursor.as_deref(), &shown_codes)
+        .await
 }
 
 #[tauri::command]
@@ -2542,7 +2557,10 @@ mod tests {
         );
         assert!(serde_json::from_str::<FetchedPostCategory>(r#""stories""#).is_err());
         assert!(serde_json::from_str::<FetchedPostCategory>(r#""clips""#).is_err());
-        assert!(serde_json::from_str::<FetchedPostScope>(r#""all""#).is_err());
+        assert_eq!(
+            serde_json::from_str::<FetchedPostScope>(r#""all""#).unwrap(),
+            FetchedPostScope::All
+        );
         assert!(serde_json::from_str::<FetchedPostScope>(r#""everything""#).is_err());
     }
 

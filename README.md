@@ -3,10 +3,10 @@
 A desktop Instagram downloader based on [insta-dl-gui](https://github.com/subzeroid/insta-dl-gui). It fetches public Instagram embeds and media directly from Instagram and saves them to your computer. Open the app and paste an Instagram link or an exact username. The app opens straight to Explore and requires no accounts or API keys.
 
 - Paste a public post, Reel, or carousel link to download its exposed media.
-- Search an exact username to browse up to six recent posts exposed by its public profile embed. Download the available items, a filtered view, selected items, or the avatar.
+- Search an exact username to browse recent posts, then press **Load more** for older posts available in Instagram's public timeline. Download all loaded items, a filtered view, selected items, or the avatar.
 - Use Queue to view or cancel downloads and Library to browse the local archive. Settings controls the download folder, metadata sidecars, and proxy.
 
-Instagram controls which content is publicly embeddable. This edition supports individual public links and up to six recent posts per profile. Stories, Highlights, follower lists, private content, and full profile histories are outside that scope.
+Instagram controls which timeline pages and media it makes available to logged-out visitors. Stories, Highlights, follower lists and private content are outside this edition's scope.
 
 ## Windows build
 

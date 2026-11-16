@@ -7,11 +7,12 @@ import {
   downloadDirect,
   downloadPost,
   enqueueFetchedPostDownload,
-  enqueueProfileDownload,
   fetchProfile,
+  fetchProfilePostsPage,
   resolveInput,
   type Post,
   type FetchedPostCategory,
+  type FetchedPostScope,
   type DownloadStatus,
   type DownloadStatusRequest,
 } from "../lib/ipc";
@@ -32,12 +33,15 @@ const router = useRouter();
 const {
   query,
   profilePreview: preview,
+  nextCursor,
   activeTab,
   postFilter,
 } = storeToRefs(explorer);
 
 const loading = ref(false);
 const error = ref<string | null>(null);
+const loadingMore = ref(false);
+const pageError = ref<string | null>(null);
 
 const modalPost = ref<Post | null>(null);
 const modalPostCategory = ref<FetchedPostCategory>("posts");
@@ -77,6 +81,11 @@ const postFilters: ReadonlyArray<{ id: PostFilter; label: string }> = [
 ];
 
 const sourcePosts = computed(() => preview.value?.recent_posts ?? []);
+const canLoadMore = computed(() => !!preview.value && (
+  nextCursor.value === undefined
+    ? preview.value.profile.media_count > sourcePosts.value.length
+    : nextCursor.value !== null
+));
 const reels = computed(() => sourcePosts.value.filter((post) => classifyPost(post).kind === "video"));
 const gridPosts = computed(() => {
   if (activeTab.value === "reels") return reels.value;
@@ -211,10 +220,12 @@ function mediaDownloadStatusClass(tab: ExploreTab, pk: string): string {
     : "bg-emerald-950/90 text-emerald-300";
 }
 const downloadableGridPosts = computed(() => gridPosts.value.filter(isDownloadablePost));
-const downloadablePostIds = computed(() => {
-  const posts = activeTab.value === "reels" ? reels.value : sourcePosts.value;
-  return new Set(posts.filter(isDownloadablePost).map((post) => post.pk));
-});
+const downloadableTabPosts = computed(() =>
+  (activeTab.value === "reels" ? reels.value : sourcePosts.value).filter(isDownloadablePost),
+);
+const downloadablePostIds = computed(() =>
+  new Set(downloadableTabPosts.value.map((post) => post.pk)),
+);
 const shownCount = computed(() => downloadableGridPosts.value.length);
 const selectedIdSet = computed(() =>
   new Set(explorer.selected[activeTab.value].filter((pk) => downloadablePostIds.value.has(pk))),
@@ -288,6 +299,8 @@ async function loadProfile(username: string) {
   profileSession = Symbol("explorer-profile-session");
   invalidateDownloadStatuses(true);
   loading.value = true;
+  loadingMore.value = false;
+  pageError.value = null;
   error.value = null;
   explorer.beginProfileLoad();
   modalPost.value = null;
@@ -302,6 +315,32 @@ async function loadProfile(username: string) {
   } finally {
     if (requests.isCurrent(seq)) {
       loading.value = false;
+    }
+  }
+}
+
+async function loadMore() {
+  const profile = preview.value?.profile;
+  if (!profile || !canLoadMore.value || loadingMore.value) return;
+  const session = profileSession;
+  loadingMore.value = true;
+  pageError.value = null;
+  try {
+    const page = await fetchProfilePostsPage(
+      profile.username,
+      nextCursor.value ?? null,
+      sourcePosts.value.slice(-MAX_EXACT_SNAPSHOT_ITEMS).map((post) => post.code),
+    );
+    if (!isCurrentProfileSession(session, profile.username, profile.pk)) return;
+    explorer.appendPostsPage(page);
+    void refreshDownloadStatuses(activeTab.value, "full");
+  } catch (cause) {
+    if (isCurrentProfileSession(session, profile.username, profile.pk)) {
+      pageError.value = String(cause);
+    }
+  } finally {
+    if (isCurrentProfileSession(session, profile.username, profile.pk)) {
+      loadingMore.value = false;
     }
   }
 }
@@ -342,60 +381,31 @@ function isCurrentProfileSession(session: symbol, username: string, profilePk: s
   );
 }
 
-async function downloadAll() {
-  const profile = preview.value?.profile;
-  if (!profile) return;
-  const tab = activeTab.value;
-  const session = profileSession;
-  const conflictKeys = downloadConflictKeys(profile.username, "all");
-  await runWithDownloadConflicts(conflictKeys, conflictKeys, async (reservationToken) => {
-    error.value = null;
-    try {
-      const id = await enqueueProfileDownload(profile.username, {
-        posts: tab === "posts",
-        reels: tab === "reels",
-        avatar: false,
-        max_posts: null,
-      });
-      jobs.transferConflictReservation(
-        reservationToken,
-        id,
-        `@${profile.username} ${tab} · all`,
-        conflictKeys,
-      );
-    } catch (e) {
-      if (isCurrentProfileSession(session, profile.username, profile.pk)) {
-        error.value = String(e);
-      }
-    }
-  });
-}
-
-async function downloadSnapshot(scope: "shown" | "selected") {
+async function downloadSnapshot(scope: FetchedPostScope) {
   const profile = preview.value?.profile;
   if (!profile) return;
   const tab = activeTab.value;
   const session = profileSession;
   const selectedEntries = scope === "selected" ? explorer.selectionSnapshot(tab) : [];
-  const requestedCount = scope === "shown" ? shownCount.value : selectedCount.value;
-  if (requestedCount > MAX_EXACT_SNAPSHOT_ITEMS) {
-    error.value = `${scope === "shown" ? "Shown" : "Selected"} snapshots are limited to 500 items. Use All for the available recent posts.`;
-    return;
-  }
   const selectedEntriesById = new Map(selectedEntries.map((entry) => [entry.pk, entry]));
   const postCandidates = scope === "shown"
     ? downloadableGridPosts.value
-    : (tab === "reels" ? reels.value : sourcePosts.value).filter(isDownloadablePost);
+    : downloadableTabPosts.value;
   const postSnapshot = postCandidates.filter(
-    (item) => scope === "shown" || selectedEntriesById.has(item.pk),
+    (item) => scope !== "selected" || selectedEntriesById.has(item.pk),
   );
+  if (postSnapshot.length > MAX_EXACT_SNAPSHOT_ITEMS) {
+    const label = { all: "All", shown: "Shown", selected: "Selected" }[scope];
+    error.value = `${label} can download up to 500 items per job. Download a smaller selection.`;
+    return;
+  }
   const submittedIds = postSnapshot.map((item) => item.pk);
   const submittedSelections = submittedIds
     .map((pk) => selectedEntriesById.get(pk))
     .filter((entry) => entry !== undefined);
   if (submittedIds.length === 0) return;
 
-  const conflictKeys = downloadConflictKeys(profile.username, "snapshot");
+  const conflictKeys = downloadConflictKeys(profile.username, scope === "all" ? "all" : "snapshot");
   const groupConflictKeys = downloadConflictKeys(profile.username, "all");
   await runWithDownloadConflicts(
     conflictKeys,
@@ -613,7 +623,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <p class="text-sm text-slate-400">Up to six recent posts available from this public profile.</p>
+      <p class="text-sm text-slate-400" aria-live="polite">{{ sourcePosts.length }} public posts loaded</p>
       <!-- Explore controls -->
       <div class="space-y-2">
         <div data-explorer-toolbar class="flex flex-wrap items-center gap-x-2 gap-y-2">
@@ -638,10 +648,12 @@ onUnmounted(() => {
             :shown-count="shownCount"
             :selected-count="selectedCount"
             :busy="activeGroupBusy"
-            all-title="Download the recent public items in this tab"
+            :all-count="downloadableTabPosts.length"
+            all-title="Download every loaded item in this tab"
+            :all-disabled-reason="downloadableTabPosts.length > MAX_EXACT_SNAPSHOT_ITEMS ? 'All can download up to 500 items per job.' : undefined"
             :shown-disabled-reason="shownDisabledReason"
             :selected-disabled-reason="selectedDisabledReason"
-            @download-all="downloadAll"
+            @download-all="downloadSnapshot('all')"
             @download-shown="downloadSnapshot('shown')"
             @download-selected="downloadSnapshot('selected')"
           />
@@ -743,9 +755,18 @@ onUnmounted(() => {
           class="card flex items-center justify-center p-12 text-sm text-slate-500"
         >
           {{
-            activeTab === "reels" ? "No videos in the recent posts." : postsEmptyMessage
+            activeTab === "reels" ? "No videos in the loaded posts." : postsEmptyMessage
           }}
         </div>
+      </div>
+      <div v-if="canLoadMore" class="flex flex-col items-center gap-2">
+        <button
+          class="btn-secondary"
+          type="button"
+          :disabled="loadingMore"
+          @click="loadMore"
+        >{{ loadingMore ? "Loading…" : "Load more" }}</button>
+        <p v-if="pageError" class="text-sm text-err" role="alert">{{ pageError }}</p>
       </div>
     </template>
 

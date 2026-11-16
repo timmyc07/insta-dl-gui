@@ -3,9 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 
 const props = defineProps<{
   shownCount: number;
+  allCount: number;
   selectedCount: number;
   busy: boolean;
   allTitle?: string;
+  allDisabledReason?: string;
   shownDisabledReason?: string;
   selectedDisabledReason?: string;
 }>();
@@ -18,6 +20,7 @@ const emit = defineEmits<{
 
 const descriptionBase = useId().replace(/:/g, "");
 const helpId = `${descriptionBase}-download-help`;
+const allReasonId = `${descriptionBase}-all-reason`;
 const shownReasonId = `${descriptionBase}-shown-reason`;
 const selectedReasonId = `${descriptionBase}-selected-reason`;
 const helpOpen = ref(false);
@@ -32,7 +35,7 @@ const selectedDescribedBy = computed(() =>
     .filter(Boolean)
     .join(" ") || undefined,
 );
-const allAvailable = computed(() => !props.busy);
+const allAvailable = computed(() => !props.busy && props.allCount > 0 && !props.allDisabledReason);
 const shownAvailable = computed(
   () => !props.busy && props.shownCount > 0 && !props.shownDisabledReason,
 );
@@ -89,7 +92,8 @@ onBeforeUnmount(() => {
             :class="allAvailable ? 'download-scope-enabled' : 'download-scope-disabled'"
             :data-download-available="allAvailable"
             :disabled="!allAvailable"
-            :title="props.allTitle ?? 'Download all fetched items'"
+            :title="props.allDisabledReason ?? props.allTitle ?? 'Download all fetched items'"
+            :aria-describedby="props.allDisabledReason ? allReasonId : undefined"
             @click="emit('download-all')"
           >
             All
@@ -142,17 +146,20 @@ onBeforeUnmount(() => {
           class="absolute right-0 top-8 z-20 w-80 rounded-lg border border-line bg-surface-2 p-3 text-left text-xs leading-5 text-slate-300 shadow-xl"
           @keydown="onHelpKeydown"
         >
-          <p><span class="font-medium text-slate-100">All</span> downloads the recent public items in the current tab.</p>
+          <p><span class="font-medium text-slate-100">All</span> downloads every loaded item in the current tab.</p>
           <p class="mt-2"><span class="font-medium text-slate-100">Shown</span> downloads exactly the currently visible items and reflects the active Posts media filter.</p>
           <p class="mt-2"><span class="font-medium text-slate-100">Selected</span> downloads every selected item, including items hidden by the current filter.</p>
-          <p class="mt-2 text-slate-400">Exact Shown and Selected snapshots are limited to 500 items.</p>
+          <p class="mt-2 text-slate-400">Each download job is limited to 500 items.</p>
         </div>
       </div>
     </div>
     <div
-      v-if="props.shownDisabledReason || props.selectedDisabledReason"
+      v-if="props.allDisabledReason || props.shownDisabledReason || props.selectedDisabledReason"
       class="max-w-sm text-right text-[11px] leading-4 text-slate-500"
     >
+      <p v-if="props.allDisabledReason" :id="allReasonId" class="text-amber-400">
+        {{ props.allDisabledReason }}
+      </p>
       <p v-if="props.shownDisabledReason" :id="shownReasonId" class="text-amber-400">
         {{ props.shownDisabledReason }}
       </p>

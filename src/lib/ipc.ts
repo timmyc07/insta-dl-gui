@@ -286,7 +286,7 @@ export interface Post {
 }
 
 export type FetchedPostCategory = "posts" | "reels";
-export type FetchedPostScope = "shown" | "selected";
+export type FetchedPostScope = "all" | "shown" | "selected";
 
 export interface Profile {
   pk: string;
@@ -301,6 +301,11 @@ export interface Profile {
 export interface ProfilePreview {
   profile: Profile;
   recent_posts: Post[];
+}
+
+export interface ProfilePostsPage {
+  posts: Post[];
+  next_cursor: string | null;
 }
 
 export interface StoryItem {
@@ -330,6 +335,14 @@ export async function resolveInput(input: string): Promise<Target> {
 
 export async function fetchProfile(username: string): Promise<ProfilePreview> {
   return invoke("fetch_profile", { username });
+}
+
+export async function fetchProfilePostsPage(
+  username: string,
+  cursor: string | null,
+  shownCodes: string[],
+): Promise<ProfilePostsPage> {
+  return invoke("fetch_profile_posts_page", { username, cursor, shownCodes });
 }
 
 export async function downloadDirect(

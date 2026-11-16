@@ -8,6 +8,9 @@ use crate::cdn::validate_remote_url;
 use crate::models::{MediaKind, MediaResource, Post, Profile};
 use crate::targets::is_username;
 
+mod timeline;
+pub use timeline::TimelinePage;
+
 const INSTAGRAM: &str = "https://www.instagram.com";
 const MAX_EMBED_BYTES: usize = 4 * 1024 * 1024;
 const UNAVAILABLE: &str = "Instagram does not provide this content as a public embed.";
@@ -43,23 +46,7 @@ impl InstagramClient {
             .send()
             .await
             .map_err(|_| "Could not connect to Instagram".to_owned())?;
-        let status = response.status();
-        match status.as_u16() {
-            200 => {}
-            429 => return Err("Instagram is rate limiting requests. Try again later.".to_owned()),
-            300..=399 | 401 | 403 | 404 => return Err(UNAVAILABLE.to_owned()),
-            _ => return Err(format!("Instagram returned HTTP {status}.")),
-        }
-        let mut chunks = response.bytes_stream();
-        let mut body = Vec::new();
-        while let Some(chunk) = chunks.next().await {
-            let chunk = chunk.map_err(|_| "Instagram closed the page connection".to_owned())?;
-            if body.len() + chunk.len() > MAX_EMBED_BYTES {
-                return Err("Instagram returned an oversized embed page".to_owned());
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(body)
+        read_public_response(response, UNAVAILABLE).await
     }
 
     pub async fn post(&self, code: &str) -> Result<Post, String> {
@@ -106,6 +93,29 @@ impl InstagramClient {
         .await;
         Ok((profile, posts))
     }
+}
+
+async fn read_public_response(
+    response: reqwest::Response,
+    unavailable: &str,
+) -> Result<Vec<u8>, String> {
+    let status = response.status();
+    match status.as_u16() {
+        200 => {}
+        429 => return Err("Instagram is rate limiting requests. Try again later.".to_owned()),
+        300..=399 | 401 | 403 | 404 => return Err(unavailable.to_owned()),
+        _ => return Err(format!("Instagram returned HTTP {status}.")),
+    }
+    let mut chunks = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.map_err(|_| "Instagram closed the page connection".to_owned())?;
+        if body.len() + chunk.len() > MAX_EMBED_BYTES {
+            return Err("Instagram returned an oversized page".to_owned());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn parse_context(body: &[u8]) -> Option<Value> {

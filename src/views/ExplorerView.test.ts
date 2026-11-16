@@ -15,7 +15,7 @@ const ipc = vi.hoisted(() => ({
   downloadPost: vi.fn(),
   checkDownloadStatuses: vi.fn(),
   enqueueFetchedPostDownload: vi.fn(),
-  enqueueProfileDownload: vi.fn(),
+  fetchProfilePostsPage: vi.fn(),
   fetchProfile: vi.fn(),
   fetchReels: vi.fn(),
   remoteMediaUrl: vi.fn((url: string) => `remote-media:${url}`),
@@ -193,6 +193,63 @@ afterEach(() => {
 });
 
 describe("ExplorerView async wiring", () => {
+  it("loads older public pages once, preserves selections, and includes them in All", async () => {
+    const first = photoPost("first", "https://cdninstagram.com/first");
+    const older = photoPost("older", "https://cdninstagram.com/older");
+    const oldest = videoPost("oldest", "https://cdninstagram.com/oldest");
+    const pending = deferred<{ posts: typeof first[]; next_cursor: string }>();
+    ipc.fetchProfilePostsPage
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce({ posts: [oldest], next_cursor: null });
+    ipc.enqueueFetchedPostDownload.mockResolvedValueOnce("loaded-posts");
+    const wrapper = render();
+    await loadProfile(wrapper, { ...preview, recent_posts: [first] });
+    const store = useExplorerStore();
+    store.toggleSelected("posts", first.pk);
+
+    const load = button(wrapper, "Load more");
+    await load.trigger("click");
+    await load.trigger("click");
+    expect(ipc.fetchProfilePostsPage).toHaveBeenCalledExactlyOnceWith("nike", null, ["FIRST"]);
+    pending.resolve({ posts: [first, older], next_cursor: "page-2" });
+    await flushPromises();
+    expect(wrapper.findAll("[data-media-id]")).toHaveLength(2);
+    expect(store.isSelected("posts", first.pk)).toBe(true);
+
+    await button(wrapper, "Load more").trigger("click");
+    await flushPromises();
+    expect(ipc.fetchProfilePostsPage).toHaveBeenLastCalledWith("nike", "page-2", ["FIRST", "OLDER"]);
+    expect(wrapper.findAll("[data-media-id]")).toHaveLength(3);
+    expect(wrapper.findAll("button").some((item) => item.text() === "Load more")).toBe(false);
+
+    await wrapper.get('[data-post-filter="photos"]').trigger("click");
+    await button(wrapper, "All").trigger("click");
+    await flushPromises();
+    expect(ipc.enqueueFetchedPostDownload).toHaveBeenCalledExactlyOnceWith(
+      "nike", "posts", "all", [first, older, oldest],
+    );
+  });
+
+  it("keeps loaded posts and retries the same page when Instagram rejects a request", async () => {
+    const first = photoPost("first", "https://cdninstagram.com/first");
+    ipc.fetchProfilePostsPage
+      .mockRejectedValueOnce(new Error("Instagram is rate limiting requests"))
+      .mockResolvedValueOnce({ posts: [], next_cursor: null });
+    const wrapper = render();
+    await loadProfile(wrapper, { ...preview, recent_posts: [first] });
+
+    await button(wrapper, "Load more").trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("rate limiting");
+    expect(wrapper.findAll("[data-media-id]")).toHaveLength(1);
+    await button(wrapper, "Load more").trigger("click");
+    await flushPromises();
+    expect(ipc.fetchProfilePostsPage.mock.calls).toEqual([
+      ["nike", null, ["FIRST"]],
+      ["nike", null, ["FIRST"]],
+    ]);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
 
   it("loads a profile requested by a relationship-result deep link before a demo default", async () => {
     await replaceExplorerRoute({ profile: "adidas" });
@@ -694,7 +751,7 @@ describe("ExplorerView async wiring", () => {
 
   it("suppresses duplicate group actions, disables the group, and retries after failure", async () => {
     const pending = deferred<string>();
-    ipc.enqueueProfileDownload.mockReturnValueOnce(pending.promise).mockResolvedValueOnce("job-2");
+    ipc.enqueueFetchedPostDownload.mockReturnValueOnce(pending.promise).mockResolvedValueOnce("job-2");
     const wrapper = render();
     await loadProfile(wrapper, {
       ...preview,
@@ -704,7 +761,7 @@ describe("ExplorerView async wiring", () => {
 
     await download.trigger("click");
     await download.trigger("click");
-    expect(ipc.enqueueProfileDownload).toHaveBeenCalledTimes(1);
+    expect(ipc.enqueueFetchedPostDownload).toHaveBeenCalledTimes(1);
     expect(downloadButtons(wrapper).every((item) => item.attributes("disabled") !== undefined)).toBe(true);
 
     pending.reject(new Error("network"));
@@ -714,7 +771,7 @@ describe("ExplorerView async wiring", () => {
     expect(button(wrapper, "Shown 1").attributes("disabled")).toBeUndefined();
     await button(wrapper, "All").trigger("click");
     await flushPromises();
-    expect(ipc.enqueueProfileDownload).toHaveBeenCalledTimes(2);
+    expect(ipc.enqueueFetchedPostDownload).toHaveBeenCalledTimes(2);
   });
 
   it("keeps an accepted snapshot busy until its queued job becomes terminal", async () => {
@@ -748,7 +805,7 @@ describe("ExplorerView async wiring", () => {
   });
 
   it("uses the profile conflict from All to block other tabs", async () => {
-    ipc.enqueueProfileDownload.mockResolvedValue("job-all-posts");
+    ipc.enqueueFetchedPostDownload.mockResolvedValue("job-all-posts");
     const wrapper = render();
     await loadProfile(wrapper, {
       ...preview,
@@ -766,8 +823,7 @@ describe("ExplorerView async wiring", () => {
     wrapper.getComponent(DownloadScopeGroup).vm.$emit("download-all");
     wrapper.getComponent(DownloadScopeGroup).vm.$emit("download-shown");
     await flushPromises();
-    expect(ipc.enqueueProfileDownload).toHaveBeenCalledTimes(1);
-    expect(ipc.enqueueFetchedPostDownload).not.toHaveBeenCalled();
+    expect(ipc.enqueueFetchedPostDownload).toHaveBeenCalledTimes(1);
 
     finishJob("job-all-posts");
     await flushPromises();
@@ -863,7 +919,6 @@ describe("ExplorerView async wiring", () => {
     await flushPromises();
 
     expect(ipc.enqueueFetchedPostDownload).not.toHaveBeenCalled();
-    expect(ipc.enqueueProfileDownload).not.toHaveBeenCalled();
     expect(ipc.downloadDirect).not.toHaveBeenCalled();
   });
 
@@ -912,7 +967,7 @@ describe("ExplorerView async wiring", () => {
     );
   }, 10_000);
 
-  it("blocks a 501-item Shown snapshot before IPC while keeping All and small Selected available", async () => {
+  it("blocks a 501-item Shown snapshot before IPC while keeping a small selection available", async () => {
     const posts = Array.from({ length: 501 }, (_, index) =>
       videoPost(`p${index}`, `https://cdninstagram.com/post-${index}.jpg`),
     );
@@ -921,7 +976,7 @@ describe("ExplorerView async wiring", () => {
     useExplorerStore().toggleSelected("posts", posts[0]!.pk);
     await flushPromises();
 
-    expect(button(wrapper, "All").attributes("disabled")).toBeUndefined();
+    expect(button(wrapper, "All").attributes("disabled")).toBeDefined();
     expect(button(wrapper, "Shown 501").attributes("disabled")).toBeDefined();
     expect(button(wrapper, "Selected 1").attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("Shown has 501 items, above the 500-item exact snapshot limit.");
@@ -930,7 +985,7 @@ describe("ExplorerView async wiring", () => {
 
     expect(ipc.enqueueFetchedPostDownload).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain(
-      "Shown snapshots are limited to 500 items. Use All for the available recent posts.",
+      "Shown can download up to 500 items per job. Download a smaller selection.",
     );
   });
 
@@ -944,7 +999,7 @@ describe("ExplorerView async wiring", () => {
     for (const post of posts) store.toggleSelected("posts", post.pk);
     await flushPromises();
 
-    expect(button(wrapper, "All").attributes("disabled")).toBeUndefined();
+    expect(button(wrapper, "All").attributes("disabled")).toBeDefined();
     expect(button(wrapper, "Selected 501").attributes("disabled")).toBeDefined();
     expect(wrapper.text()).toContain("Selected has 501 items, above the 500-item exact snapshot limit.");
     wrapper.getComponent(DownloadScopeGroup).vm.$emit("download-selected");
@@ -952,7 +1007,7 @@ describe("ExplorerView async wiring", () => {
 
     expect(ipc.enqueueFetchedPostDownload).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain(
-      "Selected snapshots are limited to 500 items. Use All for the available recent posts.",
+      "Selected can download up to 500 items per job. Download a smaller selection.",
     );
   }, 10_000);
 

@@ -626,7 +626,7 @@ describe("download journey mock", () => {
       () => invoke()("enqueue_fetched_post_download", {
         username: "nike",
         category: "posts",
-        scope: "all",
+        scope: "archive",
         posts: [valid],
       }),
       () => invoke()("enqueue_fetched_post_download", {

@@ -495,8 +495,8 @@ function validateFetchedArgs(args: CmdArgs | undefined): CmdArgs {
   if (args?.category !== "posts" && args?.category !== "reels") {
     throw new Error("Fetched post category must be posts or reels");
   }
-  if (args?.scope !== "shown" && args?.scope !== "selected") {
-    throw new Error("Fetched post scope must be shown or selected");
+  if (args?.scope !== "all" && args?.scope !== "shown" && args?.scope !== "selected") {
+    throw new Error("Fetched post scope must be all, shown, or selected");
   }
   return { ...args, username, posts: validateFetchedPosts(args?.posts) };
 }
@@ -683,7 +683,7 @@ function fetchedPostManifest(
 ): MockDownloadManifest {
   const username = String(args?.username);
   const category = args?.category as "posts" | "reels";
-  const scope = args?.scope as "shown" | "selected";
+  const scope = args?.scope as "all" | "shown" | "selected";
   const posts = args?.posts as Post[];
   const outputs = posts.flatMap((post, postIndex) => {
     const stem = safeBasenameSegment(post.code, `post-${postIndex + 1}`);
@@ -898,6 +898,16 @@ function reply(
             : AVATAR,
         },
         recent_posts: mockProfilePosts(0, remoteMediaFailureDemo).slice(0, 6),
+      };
+    }
+    case "fetch_profile_posts_page": {
+      const shown = new Set(Array.isArray(args?.shownCodes) ? args.shownCodes : []);
+      const remoteMediaFailureDemo =
+        isRemoteMediaFailureDemo() && normalizeUsername(args?.username) === "preview_demo";
+      return {
+        posts: mockProfilePosts(args?.cursor ? 12 : 0, remoteMediaFailureDemo)
+          .filter((post) => !shown.has(post.code)),
+        next_cursor: args?.cursor ? null : "mock-page-2",
       };
     }
     // event plugin stubs

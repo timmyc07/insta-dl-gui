@@ -15,6 +15,7 @@ function track<T extends { unmount: () => void }>(wrapper: T): T {
 
 function render(props: {
   shownCount: number;
+  allCount: number;
   selectedCount: number;
   busy: boolean;
   allTitle?: string;
@@ -31,18 +32,18 @@ afterEach(() => {
 
 describe("DownloadScopeGroup", () => {
   it("keeps all three download scopes stable when nothing is shown or selected", () => {
-    const wrapper = render({ shownCount: 0, selectedCount: 0, busy: false });
+    const wrapper = render({ shownCount: 0, allCount: 0, selectedCount: 0, busy: false });
     const buttons = wrapper.get('[role="group"]').findAll("button");
 
     expect(wrapper.text()).toContain("Download");
     expect(buttons.map((button) => button.text())).toEqual(["All", "Shown 0", "Selected 0"]);
-    expect(buttons[0].attributes("disabled")).toBeUndefined();
+    expect(buttons[0].attributes("disabled")).toBeDefined();
     expect(buttons[1].attributes("disabled")).toBeDefined();
     expect(buttons[2].attributes("disabled")).toBeDefined();
   });
 
   it("uses the primary treatment only for available download scopes", () => {
-    const partial = render({ shownCount: 0, selectedCount: 2, busy: false });
+    const partial = render({ shownCount: 0, allCount: 2, selectedCount: 2, busy: false });
     const partialButtons = partial.get('[role="group"]').findAll("button");
 
     expect(partialButtons.map((button) => button.attributes("data-download-available"))).toEqual([
@@ -54,14 +55,14 @@ describe("DownloadScopeGroup", () => {
     expect(partialButtons[1].classes()).toContain("download-scope-disabled");
     expect(partialButtons[2].classes()).toContain("download-scope-enabled");
 
-    const busy = render({ shownCount: 12, selectedCount: 3, busy: true });
+    const busy = render({ shownCount: 12, allCount: 12, selectedCount: 3, busy: true });
     const busyButtons = busy.get('[role="group"]').findAll("button");
     expect(busyButtons.every((button) => button.attributes("data-download-available") === "false")).toBe(true);
     expect(busyButtons.every((button) => button.classes().includes("download-scope-disabled"))).toBe(true);
   });
 
   it("emits the clicked scope once", async () => {
-    const wrapper = render({ shownCount: 12, selectedCount: 3, busy: false });
+    const wrapper = render({ shownCount: 12, allCount: 12, selectedCount: 3, busy: false });
     const buttons = wrapper.findAll("button");
 
     await buttons[0].trigger("click");
@@ -74,13 +75,13 @@ describe("DownloadScopeGroup", () => {
   });
 
   it("disables every scope while a download is busy", () => {
-    const wrapper = render({ shownCount: 12, selectedCount: 3, busy: true });
+    const wrapper = render({ shownCount: 12, allCount: 12, selectedCount: 3, busy: true });
 
     expect(wrapper.get('[role="group"]').findAll("button").every((button) => button.attributes("disabled") !== undefined)).toBe(true);
   });
 
   it("exposes a named group and useful button titles", () => {
-    const wrapper = render({ shownCount: 12, selectedCount: 3, busy: false });
+    const wrapper = render({ shownCount: 12, allCount: 12, selectedCount: 3, busy: false });
 
     expect(wrapper.get('[role="group"]').attributes("aria-label")).toBe("Download");
     for (const button of wrapper.get('[role="group"]').findAll("button")) {
@@ -89,20 +90,20 @@ describe("DownloadScopeGroup", () => {
   });
 
   it("toggles the scope help popover with an accessible relationship", async () => {
-    const wrapper = render({ shownCount: 12, selectedCount: 3, busy: false });
+    const wrapper = render({ shownCount: 12, allCount: 12, selectedCount: 3, busy: false });
     const help = wrapper.get('[data-action="scope-help"]');
 
     expect(help.attributes("aria-label")).toBe("Explain download scopes");
     expect(help.attributes("aria-expanded")).toBe("false");
     expect(wrapper.find(`#${help.attributes("aria-controls")}`).exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("recent public items");
+    expect(wrapper.text()).not.toContain("every loaded item");
 
     await help.trigger("click");
 
     expect(help.attributes("aria-expanded")).toBe("true");
     const popover = wrapper.get(`#${help.attributes("aria-controls")}`);
     expect(popover.attributes("role")).toBe("dialog");
-    expect(popover.text()).toContain("recent public items");
+    expect(popover.text()).toContain("every loaded item");
     expect(popover.text()).toContain("currently visible items");
     expect(popover.text()).toContain("Posts media filter");
     expect(popover.text()).toContain("including items hidden by the current filter");
@@ -116,7 +117,7 @@ describe("DownloadScopeGroup", () => {
   it("closes scope help on an outside click", async () => {
     const wrapper = track(mount(DownloadScopeGroup, {
       attachTo: document.body,
-      props: { shownCount: 12, selectedCount: 3, busy: false },
+      props: { shownCount: 12, allCount: 12, selectedCount: 3, busy: false },
     }));
     const help = wrapper.get('[data-action="scope-help"]');
 
@@ -130,7 +131,7 @@ describe("DownloadScopeGroup", () => {
   it("closes scope help with Escape from elsewhere in the document and returns focus to its trigger", async () => {
     const wrapper = track(mount(DownloadScopeGroup, {
       attachTo: document.body,
-      props: { shownCount: 12, selectedCount: 3, busy: false },
+      props: { shownCount: 12, allCount: 12, selectedCount: 3, busy: false },
     }));
     const help = wrapper.get('[data-action="scope-help"]');
     const outside = document.createElement("button");
@@ -148,6 +149,7 @@ describe("DownloadScopeGroup", () => {
   it("keeps disabled snapshot reasons separate from the general help", async () => {
     const wrapper = render({
       shownCount: 501,
+      allCount: 501,
       selectedCount: 501,
       busy: false,
       allTitle: "Fetch and download the complete Posts archive; uses API requests.",
@@ -177,6 +179,7 @@ describe("DownloadScopeGroup", () => {
   it("evaluates Shown and Selected disabled reasons independently", () => {
     const shownBlocked = render({
       shownCount: 501,
+      allCount: 501,
       selectedCount: 1,
       busy: false,
       shownDisabledReason: "Shown limit exceeded.",
@@ -187,6 +190,7 @@ describe("DownloadScopeGroup", () => {
 
     const selectedBlocked = render({
       shownCount: 1,
+      allCount: 501,
       selectedCount: 501,
       busy: false,
       selectedDisabledReason: "Selected limit exceeded.",
