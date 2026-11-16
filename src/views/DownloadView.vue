@@ -10,7 +10,7 @@ import {
   type ProfileOptions,
   type ProfilePreview,
 } from "../lib/ipc";
-import { buildProfileOptions, hasProfileSelection } from "../lib/profileOptions";
+import { hasProfileSelection } from "../lib/profileOptions";
 import RemoteImage from "../components/RemoteImage.vue";
 
 const app = useAppStore();
@@ -26,21 +26,17 @@ const profileDownloadBusy = ref(false);
 
 const opts = computed<ProfileOptions>(() => {
   const max = maxPosts.value;
-  return buildProfileOptions(preview.value?.profile.is_private === true, {
+  return {
     posts: posts.value,
     reels: reels.value,
-    stories: stories.value,
-    highlights: highlights.value,
     avatar: avatar.value,
     max_posts: max !== null && max > 0 ? max : null,
-  });
+  };
 });
 const canDownload = computed(() => hasProfileSelection(opts.value));
 
 const posts = ref(true);
 const reels = ref(false);
-const stories = ref(false);
-const highlights = ref(false);
 const avatar = ref(true);
 const maxPosts = ref<number | null>(null); // null = all
 
@@ -138,28 +134,18 @@ onMounted(() => {
       </div>
 
       <div class="border-t border-line p-5">
-        <div v-if="preview.profile.is_private" class="mb-3 text-sm text-warn">
-          Private profile — only the avatar is accessible.
-        </div>
+        <p class="mb-3 text-sm text-slate-400">Instagram exposes up to six recent posts in public profile embeds.</p>
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <template v-if="!preview.profile.is_private">
             <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-2" :class="{ 'border-accent/60': posts }">
-              <input v-model="posts" type="checkbox" class="accent-[var(--color-accent)]" /> Posts
+              <input v-model="posts" type="checkbox" class="accent-[var(--color-accent)]" /> Recent posts
             </label>
             <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-2" :class="{ 'border-accent/60': reels }">
-              <input v-model="reels" type="checkbox" class="accent-[var(--color-accent)]" /> Reels
+              <input v-model="reels" type="checkbox" class="accent-[var(--color-accent)]" /> Recent videos
             </label>
-            <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-2" :class="{ 'border-accent/60': stories }">
-              <input v-model="stories" type="checkbox" class="accent-[var(--color-accent)]" /> Stories
-            </label>
-            <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-2" :class="{ 'border-accent/60': highlights }">
-              <input v-model="highlights" type="checkbox" class="accent-[var(--color-accent)]" /> Highlights
-            </label>
-          </template>
           <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-2" :class="{ 'border-accent/60': avatar }">
             <input v-model="avatar" type="checkbox" class="accent-[var(--color-accent)]" /> Avatar
           </label>
-          <label v-if="!preview.profile.is_private" class="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
+          <label class="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
             <span class="text-slate-500">Max</span>
             <input
               v-model.number="maxPosts"

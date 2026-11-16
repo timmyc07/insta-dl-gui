@@ -1,96 +1,18 @@
 # Usage
 
-## Download a single post or reel
+## Download a post or Reel
 
-Paste any of these into the input and press **Fetch**:
+Paste a public Instagram post, Reel or carousel link into **Explore** or **Download** and choose **Fetch**. The job appears in **Queue**.
 
-```
-https://www.instagram.com/p/DXZlTiKEpxw/
-https://www.instagram.com/reel/DXZlTiKEpxw/
-```
+## Browse an exact username
 
-All media of the post (including carousels) downloads immediately. Live progress stays visible in the footer; click it to open **Queue** and cancel a job.
+Enter `@username` or the public profile link in **Explore**. Instagram makes up to six recent posts available through its public profile embed. The **Videos** tab filters those items to individual videos. Use **All** for the available recent items in the tab, **Shown** for the current filter, or **Selected** for items you marked. The **Avatar** button saves the profile picture when available.
 
-## Archive a whole profile
+The download scope covers publicly embeddable content. Private content, Stories, Highlights, follower lists and full profile histories require other access.
 
-1. Paste `@username` (or a profile URL) and press **Fetch** — you get a preview card: avatar, name, post/follower counts.
-2. Tick what you want:
+## Library
 
-| Option | What downloads | Lands in |
-|---|---|---|
-| **Posts** | full feed: photos, albums, videos | `<dest>/<username>/posts/` |
-| **Reels** | only video posts | `<dest>/<username>/posts/` |
-| **Stories** | active stories (24h) | `<dest>/<username>/stories/` |
-| **Highlights** | every highlight reel | `<dest>/<username>/highlights/<id>_<title>/` |
-| **Avatar** | HD profile picture | `<dest>/<username>/avatar_<pk>.<ext>` |
-| **Max** | cap on posts or reels considered (empty = all) | — |
-
-3. Press **Download**. Progress appears in the global footer; click it to open **Queue** for every active and completed job.
-
-For a private profile, only **Avatar** is available. Posts, reels, stories and highlights remain hidden because the public API cannot access them.
-
-## Explore and choose what to download
-
-The app opens on **Explore** after setup. Type at least two characters of a username, pick an autocomplete result with the mouse or arrow keys and **Enter**, then switch between **Posts**, **Reels** and **Stories**. The selected profile, active tab, loaded pages and selections stay available when you visit another app section and return during the same app session.
-
-Current Stories load automatically after a public profile opens and cost 2 HikerAPI requests. A Stories failure does not block Posts or Reels; open **Stories** and use **Retry stories** when needed.
-
-Post and Reel cards are labeled as **Photo**, **Video** or **Carousel**. In **Posts**, use **All**, **Photos**, **Videos** or **Carousels** to filter the loaded grid without losing selections hidden by the current filter. A card whose response contains no downloadable media stays visible as **Unavailable**, but it is not selectable and does not count toward Shown or Selected.
-
-Each tab has the same **Download** control:
-
-| Action | What it downloads | API and Queue behavior |
-|---|---|---|
-| **All** | The complete Posts or Reels archive, including pages not shown | Fetches through HikerAPI and may use additional requests |
-| **All** on Stories | A refreshed set of all currently active Stories | Uses additional HikerAPI requests |
-| **Shown N** | The exact items currently loaded in that tab | Fetches no additional pages and creates one Queue job |
-| **Selected N** | Only the cards whose checkboxes are selected | Fetches no additional pages and creates one Queue job |
-
-Use the information control beside **All / Shown / Selected** for an in-app explanation of the three scopes.
-
-Use **Load more** on Posts or Reels before **Shown** if you want more pages in that exact snapshot. Shown and Selected accept at most 500 items. At 501 or more, the action is disabled and nothing is silently truncated or split; use **All** for the complete archive instead.
-
-Posts show the current page and, when the profile total allows it, an estimated total page count. Reels show the current loaded page.
-
-Click a card to preview it, or use its checkbox to add it to **Selected**. A Post or Reel preview can copy the full description or canonical Instagram link. After Queue accepts a Selected snapshot, only the submitted selections are cleared; a failed enqueue keeps them selected, and a card reselected while the request is pending stays selected. Press **Escape** to close autocomplete or an open preview.
-
-## Browse Followers and Following
-
-On a public profile, click its **Followers** or **Following** count to open a dedicated relationship page. The first page loads immediately; use **Load more** to follow the cursor through additional pages. When the profile total and first page size are available, the page status includes an estimated total number of pages.
-
-Type at least two characters in the relationship search box to search the complete Followers or Following list through HikerAPI. Each search costs 1 request. Clearing the search restores the relationship pages you already loaded, and selecting an account opens that profile back in Explore.
-
-Private profile counts are not links. If a private relationship URL is opened directly, the app explains that the lists are unavailable, disables search, and does not issue a relationship request.
-
-## Where files end up
-
-Default destination is `~/Downloads/insta-dl` (change it in **Settings**). Layout matches [insta-dl CLI](https://subzeroid.github.io/insta-dl/) exactly, so both tools can maintain the same archive:
-
-```
-~/Downloads/insta-dl/<username>/
-    2026-04-21_16-04-15_DXZlTiKEpxw.mp4      # feed post, mtime = taken_at
-    2026-04-21_16-04-15_DXZlTiKEpxw.json     # metadata sidecar
-    avatar_25025320.jpg
-    stories/
-        2026-04-21_18-30-00_178290.jpg
-    highlights/
-        17991_Travel/
-            2025-10-12_19-20-30_4011.jpg
-```
-
-Filenames start with the original post timestamp, so gallery apps sort chronologically. The JSON sidecar carries caption, like/comment counts and owner info — toggle it off in **Settings** if you only want media.
-
-## Browse the local media Library
-
-The **Library** is a local index of media in your download folder. It does not upload archive contents or spend HikerAPI requests.
-
-### First scan
-
-1. Open **Library**. The current download folder is registered automatically.
-2. Press **Scan library** to import media already on disk.
-3. Keep the page open to watch progress, or cancel the scan and start it again later.
-
-Downloads completed by the app are cataloged automatically. The initial scan is still needed for files that existed before the Library was enabled, including archives shared with `insta-dl` CLI.
+Downloads appear in your local Library. Choose **Scan library** to import existing media from the configured download folder.
 
 ### Search and filters
 
@@ -110,42 +32,16 @@ A successful rescan updates entries found at their existing archive paths. Catal
 
 Library scans are read-only for the archive. They never move, rename, edit or delete downloaded media or JSON sidecars. Only the rebuildable catalog database is updated.
 
-The database is `insta-dl-gui/catalog.sqlite3` inside your platform app-data directory:
+The database is `insta-dl-gui-local/catalog.sqlite3` inside your platform app-data directory:
 
 | OS | Catalog directory |
 |---|---|
-| macOS | `~/Library/Application Support/insta-dl-gui/` |
-| Windows | `%APPDATA%\insta-dl-gui\` |
-| Linux | `$XDG_DATA_HOME/insta-dl-gui/` or `~/.local/share/insta-dl-gui/` |
+| macOS | `~/Library/Application Support/insta-dl-gui-local/` |
+| Windows | `%APPDATA%\insta-dl-gui-local\` |
+| Linux | `$XDG_DATA_HOME/insta-dl-gui-local/` or `~/.local/share/insta-dl-gui-local/` |
 
 Changing the download folder in **Settings** registers it as another Library root; existing roots and their history remain in the catalog. If registration fails after the setting is saved, Settings shows a warning with a link back to Library so you can fix the folder and scan again.
 
-## Incremental archives
+## Network proxy
 
-Re-running the same profile skips everything already on disk — file stems are compared before each download. Only new content costs API requests. Use this to keep an archive in sync: run daily, pay only for new posts.
-
-## Configure a network proxy
-
-Use one shared proxy when HikerAPI or Instagram CDN media is unavailable on your connection:
-
-1. Open **Settings** and enter the proxy URL under **Network proxy**.
-2. Use an `http://`, `https://`, `socks5://` or `socks5h://` URL. Credentials can be included in the URL, for example `http://username:password@proxy.example:8080`.
-3. Press **Apply proxy**. New HikerAPI requests and Instagram CDN/media downloads use it immediately; no restart is needed.
-
-Downloads already in progress keep the network client and proxy they started with. New operations use the latest saved setting.
-
-Press **Clear proxy** to restore an explicit direct connection for new operations. Direct mode ignores proxy environment variables rather than inheriting them from the operating system.
-
-Settings displays only a credential-redacted hint, but the complete URL is stored in the app's restrictive local config file so authenticated proxies can reconnect after launch. Do not paste a raw authenticated proxy URL into an issue report; redact its username and password first.
-
-From the preview warning, **Open Settings** jumps directly to this proxy card. After turning on a VPN, applying a corrected proxy or clearing the proxy for a direct connection, **Retry** reloads every currently mounted preview. **Dismiss** hides the warning for the current app process only.
-
-## Queue
-
-The footer keeps download activity visible from Download, Explore, Library and Settings. It shows the active job count, current file and downloaded bytes; click anywhere on it to open **Queue**.
-
-The **Queue** screen lists all jobs with their start time, per-file progress and byte counters. Terminal jobs also show when they finished. Failed jobs show the reason (private profile, quota exhausted, deleted post). Cancelled and finished jobs can be cleared.
-
-Click a completed job to inspect the exact, ordered media files newly saved by that download. Queue distinguishes requested Instagram items from saved files, so selecting four posts can correctly produce five files when one is a carousel. Each row shows a photo or video preview, safe basename and size, with **Open** and **Show in Finder** actions when the file is available. Large results start with 50 files and load the next 50 on demand. JSON sidecars and files skipped because they already existed are not included in this result list.
-
-If a batch saves some files before a later item fails, it finishes with the exact number saved. Re-run the same target after fixing the cause; existing files are skipped.
+In **Settings**, enter an HTTP, HTTPS, SOCKS5 or SOCKS5H proxy under **Network proxy** and choose **Apply proxy**. New Instagram page and media requests use that proxy. **Clear proxy** restores a direct connection.

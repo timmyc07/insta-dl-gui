@@ -21,27 +21,28 @@ impl Target {
                 username: bare.to_lowercase(),
             });
         }
-        if !s.contains("instagram.com") {
+        let url = if s.contains("://") {
+            url::Url::parse(s).ok()?
+        } else {
+            url::Url::parse(&format!("https://{s}")).ok()?
+        };
+        if !matches!(url.scheme(), "http" | "https")
+            || !matches!(url.host_str(), Some("instagram.com" | "www.instagram.com"))
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
             return None;
         }
-
-        // https://(www.)instagram.com/<path>?<query>#<fragment>
-        let rest = s.split("instagram.com").nth(1)?;
-        let rest = rest.trim_start_matches('/');
-        let rest = match rest.find(['?', '#']) {
-            Some(i) => &rest[..i],
-            None => rest,
-        };
-        let segments: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
-
+        let segments: Vec<_> = url.path().trim_matches('/').split('/').collect();
         match segments.as_slice() {
-            ["stories", username, _story_id] => Some(Self::Profile {
-                username: username.to_lowercase(),
-            }),
-            [kind, code] if matches!(*kind, "p" | "reel" | "reels" | "tv") => Some(Self::Post {
-                code: (*code).to_string(),
-            }),
-            [username] => Some(Self::Profile {
+            [kind, code] | [_, kind, code]
+                if matches!(*kind, "p" | "reel" | "reels" | "tv") && is_shortcode(code) =>
+            {
+                Some(Self::Post {
+                    code: (*code).to_owned(),
+                })
+            }
+            [username] if is_username(username) => Some(Self::Profile {
                 username: username.to_lowercase(),
             }),
             _ => None,
@@ -49,7 +50,7 @@ impl Target {
     }
 }
 
-fn is_username(s: &str) -> bool {
+pub(crate) fn is_username(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 30
         && s.chars()
@@ -58,9 +59,12 @@ fn is_username(s: &str) -> bool {
         && !s.ends_with('.')
 }
 
-/// Extract the shortcode from a media payload (`code` field or derive from pk).
-pub fn shortcode_of(media: &serde_json::Value) -> Option<String> {
-    media.get("code").and_then(|v| v.as_str()).map(String::from)
+pub(crate) fn is_shortcode(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 64
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 #[cfg(test)]

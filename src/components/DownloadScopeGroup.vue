@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
           class="absolute right-0 top-8 z-20 w-80 rounded-lg border border-line bg-surface-2 p-3 text-left text-xs leading-5 text-slate-300 shadow-xl"
           @keydown="onHelpKeydown"
         >
-          <p><span class="font-medium text-slate-100">All</span> downloads the complete category archive and may make API requests.</p>
+          <p><span class="font-medium text-slate-100">All</span> downloads the recent public items in the current tab.</p>
           <p class="mt-2"><span class="font-medium text-slate-100">Shown</span> downloads exactly the currently visible items and reflects the active Posts media filter.</p>
           <p class="mt-2"><span class="font-medium text-slate-100">Selected</span> downloads every selected item, including items hidden by the current filter.</p>
           <p class="mt-2 text-slate-400">Exact Shown and Selected snapshots are limited to 500 items.</p>

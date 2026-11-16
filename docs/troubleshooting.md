@@ -1,12 +1,8 @@
 # Troubleshooting
 
-## "Invalid token — get a new one at hikerapi.com"
+## Instagram does not provide this content as a public embed
 
-The stored token was rejected (HTTP 401). Copy a fresh token from your [HikerAPI dashboard](https://hikerapi.com/p/uk064a1b) and paste it again. Tokens can be revoked from the same page.
-
-## "Quota exhausted — top up at hikerapi.com"
-
-Your balance hit zero mid-run (HTTP 402). Top up at [hikerapi.com](https://hikerapi.com/p/uk064a1b), then re-run the job — already-downloaded files are skipped, so you only pay for what's missing.
+Check that the link opens publicly and that the owner permits embedding. When Instagram rate limits anonymous requests, wait before trying again.
 
 ## "Not found on Instagram (private profile or deleted post)"
 
@@ -26,13 +22,13 @@ Instagram profile data can load while avatars and post thumbnails fall back to n
 - **Retry** reloads every currently mounted preview after you change the connection.
 - **Dismiss** hides the warning for the current app process only.
 
-On a direct connection, turn on a VPN and press **Retry**. If your network needs a shared proxy, configure it in Settings so both HikerAPI requests and Instagram media use the same route. If a proxy is already configured, verify its scheme, hostname, port and credentials, press **Apply proxy**, then retry; use **Clear proxy** when the connection should be direct.
+On a direct connection, turn on a VPN and press **Retry**. If your network needs a shared proxy, configure it in Settings so both Instagram page and media requests use the same route. If a proxy is already configured, verify its scheme, hostname, port and credentials, press **Apply proxy**, then retry; use **Clear proxy** when the connection should be direct.
 
-The warning cannot distinguish a local block from a proxy problem or a temporary upstream/CDN failure. It is preview-only: it does not block or alter profile metadata or download behavior, and it never displays failed media URLs, the HikerAPI token or proxy credentials.
+The warning cannot distinguish a local block from a proxy problem or a temporary upstream/CDN failure. It is preview-only: it does not block or alter profile metadata or download behavior, and it never displays failed media URLs, or proxy credentials.
 
 ## The network proxy is unreachable or rejects authentication
 
-Open **Settings** and verify the proxy scheme, hostname, port and credentials. The app accepts HTTP, HTTPS, SOCKS5 and SOCKS5H proxy URLs, including credentials in the URL. Press **Apply proxy** again after correcting it; the saved proxy is used for new HikerAPI requests and Instagram CDN/media downloads without restarting the app.
+Open **Settings** and verify the proxy scheme, hostname, port and credentials. The app accepts HTTP, HTTPS, SOCKS5 and SOCKS5H proxy URLs, including credentials in the URL. Press **Apply proxy** again after correcting it; the saved proxy is used for new Instagram page and media requests without restarting the app.
 
 If the connection should work without a proxy, press **Clear proxy** and retry the operation. This restores explicit direct routing for new operations and ignores proxy environment variables. Downloads already in progress keep the proxy they started with, so cancel and restart an affected download if needed.
 

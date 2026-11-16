@@ -8,10 +8,8 @@ const state = vi.hoisted(() => ({
   app: {
     ready: true,
     appVersion: "0.6.0",
-    hasToken: true,
     balance: null,
     init: vi.fn(),
-    refreshBalance: vi.fn(),
   },
   jobs: { init: vi.fn(), jobs: new Map() },
   push: vi.fn(),
@@ -19,7 +17,6 @@ const state = vi.hoisted(() => ({
 
 vi.mock("./stores/app", () => ({ useAppStore: () => state.app }));
 vi.mock("./stores/jobs", () => ({ useJobsStore: () => state.jobs }));
-vi.mock("./lib/ipc", () => ({ formatBalance: vi.fn(() => "10 req") }));
 vi.mock("vue-router", () => ({
   useRoute: () => state.route,
   useRouter: () => ({ push: state.push }),
@@ -56,7 +53,7 @@ describe("application chrome", () => {
     expect(wrapper.get("header [data-app-version]").text()).toBe("v0.6.0");
   });
 
-  it("mounts global download activity outside onboarding", () => {
+  it("mounts global download activity on launch", () => {
     const wrapper = mount(App, {
       global: {
         stubs: {
@@ -96,22 +93,6 @@ describe("application chrome", () => {
     );
   });
 
-  it("does not mount download activity during onboarding", () => {
-    state.route.path = "/onboarding";
-    const wrapper = mount(App, {
-      global: {
-        stubs: {
-          RouterLink: true,
-          RouterView: true,
-          RemoteMediaFailureBanner: remoteMediaFailureBannerStub,
-        },
-      },
-    });
-
-    expect(wrapper.find("[data-testid='download-activity']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='remote-media-failure-banner-stub']").exists()).toBe(false);
-  });
-
   it("contains narrow navigation overflow without widening the page", () => {
     const wrapper = mount(App, {
       global: {
@@ -145,6 +126,5 @@ describe("application chrome", () => {
     expect(navigation.findAll("a").every((link) => link.classes().includes("shrink-0"))).toBe(
       true,
     );
-    expect(navigation.get("button").classes()).toContain("shrink-0");
   });
 });

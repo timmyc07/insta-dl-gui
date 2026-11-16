@@ -95,15 +95,14 @@ describe("DownloadScopeGroup", () => {
     expect(help.attributes("aria-label")).toBe("Explain download scopes");
     expect(help.attributes("aria-expanded")).toBe("false");
     expect(wrapper.find(`#${help.attributes("aria-controls")}`).exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("complete category archive");
+    expect(wrapper.text()).not.toContain("recent public items");
 
     await help.trigger("click");
 
     expect(help.attributes("aria-expanded")).toBe("true");
     const popover = wrapper.get(`#${help.attributes("aria-controls")}`);
     expect(popover.attributes("role")).toBe("dialog");
-    expect(popover.text()).toContain("complete category archive");
-    expect(popover.text()).toContain("may make API requests");
+    expect(popover.text()).toContain("recent public items");
     expect(popover.text()).toContain("currently visible items");
     expect(popover.text()).toContain("Posts media filter");
     expect(popover.text()).toContain("including items hidden by the current filter");

@@ -48,8 +48,6 @@ jobs:
         run: cargo clippy --locked -- -D warnings
       - name: Tests (offline)
         working-directory: src-tauri
-        env:
-          SMOKE_TOKEN: ""
         run: cargo test --locked
       - run: npm run build
 

@@ -1,5 +1,5 @@
-site_name: insta-dl-gui
-site_description: Desktop Instagram downloader — posts, reels, stories, highlights via HikerAPI. No login required.
+site_name: insta-dl-gui Local
+site_description: Local desktop downloader for public Instagram embeds
 site_url: https://subzeroid.github.io/insta-dl-gui/
 repo_url: https://github.com/subzeroid/insta-dl-gui
 repo_name: subzeroid/insta-dl-gui
@@ -34,7 +34,6 @@ theme:
 nav:
   - Home: index.md
   - Installation: installation.md
-  - Getting a token: token.md
   - Usage: usage.md
   - Troubleshooting: troubleshooting.md
   - Contributing: contributing.md

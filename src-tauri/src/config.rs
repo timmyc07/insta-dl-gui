@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", default)]
 pub struct Config {
-    pub token: Option<String>,
     pub dest_dir: String,
     #[serde(rename = "sidecar")]
     pub sidecar: bool,
@@ -18,7 +17,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            token: None,
             dest_dir: default_dest_dir(),
             sidecar: true,
             proxy_url: None,
@@ -29,7 +27,6 @@ impl Default for Config {
 impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Config")
-            .field("token", &self.token.as_ref().map(|_| "***"))
             .field("dest_dir", &self.dest_dir)
             .field("sidecar", &self.sidecar)
             .field("proxy_url", &self.proxy_hint())
@@ -46,7 +43,7 @@ fn default_dest_dir() -> String {
 
 impl Config {
     pub fn path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("insta-dl-gui").join("config.json"))
+        dirs::config_dir().map(|d| d.join("insta-dl-gui-local").join("config.json"))
     }
 
     pub fn load() -> Self {
@@ -78,12 +75,6 @@ impl Config {
         fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
         restrictive_file_perms(&path);
         Ok(())
-    }
-
-    pub fn token_hint(&self) -> Option<String> {
-        self.token
-            .as_ref()
-            .map(|t| format!("***{}", &t[t.len().saturating_sub(4)..]))
     }
 
     pub fn proxy_hint(&self) -> Option<String> {

@@ -1,5 +1,4 @@
 use insta_dl_gui_lib::config::Config;
-use insta_dl_gui_lib::hiker::HikerClient;
 use insta_dl_gui_lib::network::{build_cdn_client, NetworkClients};
 use insta_dl_gui_lib::proxy::apply_proxy;
 use std::io::{Read, Write};
@@ -159,31 +158,6 @@ fn start_connect_proxy() -> (String, mpsc::Receiver<String>, thread::JoinHandle<
 }
 
 #[tokio::test]
-async fn hiker_client_routes_requests_through_an_http_proxy() {
-    let _environment_lock = lock_proxy_environment().await;
-    let proxy = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/sys/balance"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "requests": 42 })),
-        )
-        .mount(&proxy)
-        .await;
-
-    let client = HikerClient::with_base_url_and_proxy(
-        "token".to_owned(),
-        "http://hiker.invalid".to_owned(),
-        Some(&proxy.uri()),
-    )
-    .expect("proxy client");
-
-    let balance = client.balance().await.expect("balance via proxy");
-
-    assert_eq!(balance.requests, 42);
-    assert_eq!(proxy.received_requests().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
 async fn cdn_client_routes_requests_through_an_http_proxy() {
     let _environment_lock = lock_proxy_environment().await;
     let proxy = MockServer::start().await;
@@ -202,27 +176,6 @@ async fn cdn_client_routes_requests_through_an_http_proxy() {
 
     assert_eq!(response.text().await.unwrap(), "proxy-cdn");
     assert_eq!(proxy.received_requests().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn hiker_client_without_proxy_reaches_direct_origin() {
-    let _environment_lock = lock_proxy_environment().await;
-    let origin = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/sys/balance"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "requests": 7 })),
-        )
-        .mount(&origin)
-        .await;
-
-    let balance = HikerClient::with_base_url("token".to_owned(), origin.uri())
-        .balance()
-        .await
-        .expect("direct balance");
-
-    assert_eq!(balance.requests, 7);
-    assert_eq!(origin.received_requests().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -257,14 +210,6 @@ async fn disabled_proxy_ignores_proxy_environment_for_direct_clients() {
         .mount(&origin)
         .await;
     Mock::given(method("GET"))
-        .and(path("/sys/balance"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "requests": 7 })),
-        )
-        .expect(1)
-        .mount(&origin)
-        .await;
-    Mock::given(method("GET"))
         .and(path("/cdn"))
         .respond_with(ResponseTemplate::new(200).set_body_string("direct"))
         .expect(1)
@@ -287,9 +232,6 @@ async fn disabled_proxy_ignores_proxy_environment_for_direct_clients() {
         "direct"
     );
 
-    let hiker = HikerClient::with_base_url("token".to_owned(), origin.uri());
-    assert_eq!(hiker.balance().await.unwrap().requests, 7);
-
     let cdn = build_cdn_client(None).unwrap();
     assert_eq!(
         cdn.get(format!("{}/cdn", origin.uri()))
@@ -304,17 +246,16 @@ async fn disabled_proxy_ignores_proxy_environment_for_direct_clients() {
 }
 
 #[tokio::test]
-async fn network_clients_route_hiker_and_cdn_https_requests_through_connect_proxy() {
+async fn network_clients_route_instagram_and_cdn_https_requests_through_connect_proxy() {
     let _environment_lock = lock_proxy_environment().await;
     let (proxy_url, headers_rx, server) = start_connect_proxy();
     let clients = NetworkClients::from_config(&Config {
-        token: Some("token".to_owned()),
         proxy_url: Some(proxy_url),
         ..Config::default()
     })
     .expect("configured clients");
 
-    let hiker_result = tokio::time::timeout(TEST_TIMEOUT, clients.hiker.unwrap().balance()).await;
+    let instagram_result = tokio::time::timeout(TEST_TIMEOUT, clients.instagram.post("ABC")).await;
     let cdn_result = tokio::time::timeout(
         TEST_TIMEOUT,
         clients.cdn.get("https://cdn.invalid/asset.jpg").send(),
@@ -325,10 +266,10 @@ async fn network_clients_route_hiker_and_cdn_https_requests_through_connect_prox
     let second = headers_rx.recv_timeout(TEST_TIMEOUT);
     let server_result = server.join();
 
-    assert!(hiker_result.is_ok(), "Hiker request timeout");
+    assert!(instagram_result.is_ok(), "Instagram request timeout");
     assert!(
-        hiker_result.unwrap().is_err(),
-        "Hiker request unexpectedly succeeded"
+        instagram_result.unwrap().is_err(),
+        "Instagram request unexpectedly succeeded"
     );
     assert!(cdn_result.is_ok(), "CDN request timeout");
     assert!(
@@ -343,7 +284,7 @@ async fn network_clients_route_hiker_and_cdn_https_requests_through_connect_prox
     ];
     assert!(requests
         .iter()
-        .any(|headers| headers.starts_with("CONNECT api.hikerapi.com:443 HTTP/1.1\r\n")));
+        .any(|headers| headers.starts_with("CONNECT www.instagram.com:443 HTTP/1.1\r\n")));
     assert!(requests
         .iter()
         .any(|headers| headers.starts_with("CONNECT cdn.invalid:443 HTTP/1.1\r\n")));
@@ -352,7 +293,6 @@ async fn network_clients_route_hiker_and_cdn_https_requests_through_connect_prox
 #[test]
 fn network_clients_reject_invalid_proxy_configuration() {
     let result = NetworkClients::from_config(&Config {
-        token: Some("token".to_owned()),
         proxy_url: Some("not a proxy URL".to_owned()),
         ..Config::default()
     });

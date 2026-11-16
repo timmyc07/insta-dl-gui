@@ -47,8 +47,6 @@ jobs:
         run: cargo clippy --locked -- -D warnings
       - name: Tests (offline)
         working-directory: src-tauri
-        env:
-          SMOKE_TOKEN: ""
         run: cargo test --locked
 
   build-matrix:
@@ -86,7 +84,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          app_path="src-tauri/target/debug/bundle/macos/insta-dl-gui.app"
+          app_path="src-tauri/target/debug/bundle/macos/insta-dl-gui Local.app"
           codesign --verify --deep --strict "$app_path"
           requirements="$(codesign --display --requirements - "$app_path" 2>&1)"
           grep -Fq "designated =>" <<<"$requirements"

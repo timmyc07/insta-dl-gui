@@ -2,17 +2,11 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../stores/app";
-import { formatBalance } from "../lib/ipc";
-import TokenInput from "../components/TokenInput.vue";
 
 const app = useAppStore();
 const sidecar = ref(app.sidecar);
 const sidecarSaving = ref(false);
 const saveError = ref<string | null>(null);
-const replacementToken = ref("");
-const tokenBusy = ref(false);
-const tokenError = ref<string | null>(null);
-const tokenSuccess = ref<string | null>(null);
 const replacementProxy = ref("");
 const proxyCard = ref<HTMLFormElement | null>(null);
 const proxyInput = ref<HTMLInputElement | null>(null);
@@ -66,23 +60,6 @@ async function pickDir() {
   }
 }
 
-async function replaceToken() {
-  const token = replacementToken.value.trim();
-  if (!token || tokenBusy.value) return;
-  tokenBusy.value = true;
-  tokenError.value = null;
-  tokenSuccess.value = null;
-  try {
-    const balance = await app.replaceToken(token);
-    replacementToken.value = "";
-    tokenSuccess.value = `Token replaced · ${formatBalance(balance)}`;
-  } catch (cause) {
-    tokenError.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    tokenBusy.value = false;
-  }
-}
-
 async function applyProxy() {
   const proxyUrl = replacementProxy.value.trim();
   if (!proxyUrl || app.proxySaving) return;
@@ -91,7 +68,7 @@ async function applyProxy() {
   try {
     await app.setProxy(proxyUrl);
     replacementProxy.value = "";
-    proxySuccess.value = "Proxy applied to HikerAPI and Instagram CDN";
+    proxySuccess.value = "Proxy applied to Instagram pages and media";
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : cause;
     proxyError.value = message === PROXY_VALIDATION_ERROR ? message : PROXY_SAVE_ERROR;
@@ -120,41 +97,6 @@ async function clearProxy() {
   <div class="mx-auto max-w-2xl space-y-6 p-6">
     <h2 class="text-lg font-semibold">Settings</h2>
 
-    <form data-testid="token-form" class="card space-y-3 p-5" @submit.prevent="replaceToken">
-      <div>
-        <label for="replacement-hiker-token" class="text-sm font-medium text-slate-300">HikerAPI token</label>
-        <p id="replacement-hiker-token-current" class="mt-1 text-xs text-slate-500">
-          Current: <span data-testid="token-hint" class="font-mono text-slate-400">{{ app.tokenHint || "Not configured" }}</span>
-        </p>
-      </div>
-      <div class="flex gap-2">
-        <TokenInput
-          v-model="replacementToken"
-          id="replacement-hiker-token"
-          name="hiker-token"
-          class="font-mono text-xs"
-          placeholder="Paste a new token…"
-          autocomplete="off"
-          aria-describedby="replacement-hiker-token-current"
-          :disabled="tokenBusy"
-        />
-        <button
-          data-testid="replace-token"
-          class="btn-primary shrink-0"
-          type="submit"
-          :disabled="tokenBusy || !replacementToken.trim()"
-        >
-          {{ tokenBusy ? "Validating…" : "Replace token" }}
-        </button>
-      </div>
-      <p v-if="tokenError" data-testid="token-error" class="text-xs text-err" role="alert">
-        {{ tokenError }}
-      </p>
-      <p v-else-if="tokenSuccess" data-testid="token-success" class="text-xs text-ok" role="status">
-        {{ tokenSuccess }}
-      </p>
-    </form>
-
     <form
       id="network-proxy"
       ref="proxyCard"
@@ -167,7 +109,7 @@ async function clearProxy() {
       <div>
         <label for="network-proxy-url" class="text-sm font-medium text-slate-300">Network proxy</label>
         <p id="proxy-explanation" class="mt-1 text-xs text-slate-500">
-          Routes both HikerAPI and Instagram CDN requests.
+          Routes both Instagram pages and media requests.
         </p>
         <p id="proxy-current" class="mt-1 text-xs text-slate-500">
           Current:
@@ -223,7 +165,7 @@ async function clearProxy() {
 
     <div class="card space-y-1 p-5">
       <div class="text-sm font-medium text-slate-300">Download folder</div>
-      <p class="text-xs text-slate-500">Files are saved as dest/&lt;username&gt;/posts|stories|highlights/…</p>
+      <p class="text-xs text-slate-500">Files are saved as dest/&lt;username&gt;/…</p>
       <div class="mt-2 flex gap-2">
         <input class="input font-mono text-xs" :value="app.destDir" readonly />
         <button class="btn-secondary shrink-0" @click="pickDir">Browse…</button>

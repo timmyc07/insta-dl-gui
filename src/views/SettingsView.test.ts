@@ -7,20 +7,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ipc = vi.hoisted(() => ({
   configState: vi.fn(),
-  getBalance: vi.fn(),
   saveSettings: vi.fn(),
   setProxy: vi.fn(),
-  validateToken: vi.fn(),
 }));
 const dialog = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock("../lib/ipc", () => ({
   configState: ipc.configState,
-  formatBalance: (balance: { requests: number }) => `${balance.requests} req`,
-  getBalance: ipc.getBalance,
   saveSettings: ipc.saveSettings,
   setProxy: ipc.setProxy,
-  validateToken: ipc.validateToken,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: dialog.open }));
 
@@ -73,21 +68,16 @@ describe("Settings Library registration warning", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     ipc.configState.mockResolvedValue({
-      has_token: true,
-      token_hint: "***old1",
       has_proxy: true,
       proxy_hint: "socks5h://***@proxy.example:1080/",
       dest_dir: "/archive/old",
       sidecar: true,
     });
-    ipc.getBalance.mockResolvedValue({ requests: 10, rate: null, amount: null, currency: null });
   });
 
   it("shows a Library rescan link when the saved destination could not be registered", async () => {
     dialog.open.mockResolvedValue("/archive/new");
     ipc.saveSettings.mockResolvedValue({
-      has_token: false,
-      token_hint: null,
       has_proxy: true,
       proxy_hint: "socks5h://***@proxy.example:1080/",
       dest_dir: "/archive/new",
@@ -103,100 +93,6 @@ describe("Settings Library registration warning", () => {
     expect(wrapper.text()).toContain("Settings were saved");
     const link = wrapper.get('a[href="/library"]');
     expect(link.text()).toContain("Library");
-  });
-
-  it("keeps the stored hint masked and toggles only the draft token visibility", async () => {
-    const { wrapper } = await renderSettings();
-
-    expect(wrapper.get("[data-testid='token-hint']").text()).toBe("***old1");
-    const label = wrapper.get<HTMLLabelElement>('label[for="replacement-hiker-token"]');
-    expect(label.text()).toBe("HikerAPI token");
-    expect(wrapper.find("#replacement-hiker-token-current").exists()).toBe(true);
-    const input = wrapper.get<HTMLInputElement>("input[name='hiker-token']");
-    expect(input.attributes("id")).toBe("replacement-hiker-token");
-    expect(input.attributes("aria-describedby")).toBe("replacement-hiker-token-current");
-    expect(input.attributes("type")).toBe("password");
-    expect(wrapper.get("[data-testid='replace-token']").attributes("disabled")).toBeDefined();
-    await input.setValue("visible-token");
-    expect(input.element.value).toBe("visible-token");
-
-    const showButton = wrapper.get<HTMLButtonElement>("button[aria-label='Show token']");
-    await showButton.trigger("click");
-
-    expect(input.attributes("type")).toBe("text");
-    expect(input.element.value).toBe("visible-token");
-    expect(wrapper.get("[data-testid='token-hint']").text()).toBe("***old1");
-    expect(wrapper.find("button[aria-label='Hide token']").exists()).toBe(true);
-
-    await wrapper.get("button[aria-label='Hide token']").trigger("click");
-
-    expect(input.attributes("type")).toBe("password");
-    expect(input.element.value).toBe("visible-token");
-    expect(input.attributes("name")).toBe("hiker-token");
-    expect(input.attributes("placeholder")).toBe("Paste a new token…");
-    expect(input.attributes("autocomplete")).toBe("off");
-    expect(input.classes()).toEqual(expect.arrayContaining(["font-mono", "text-xs"]));
-  });
-
-  it("disables token controls while validation is pending", async () => {
-    const pending = deferred<{ requests: number; rate: number | null; amount: number | null; currency: string | null }>();
-    ipc.validateToken.mockReturnValueOnce(pending.promise);
-    const { wrapper } = await renderSettings();
-    const input = wrapper.get<HTMLInputElement>("input[name='hiker-token']");
-
-    await input.setValue("fresh-token");
-    await wrapper.get("[data-testid='token-form']").trigger("submit");
-    await nextTick();
-
-    expect(input.attributes("disabled")).toBeDefined();
-    expect(wrapper.get("button[aria-label='Show token']").attributes("disabled")).toBeDefined();
-
-    pending.resolve({ requests: 99, rate: null, amount: null, currency: null });
-    await flushPromises();
-  });
-
-  it("conceals a revealed draft during validation and keeps later drafts hidden", async () => {
-    const pending = deferred<{ requests: number; rate: number | null; amount: number | null; currency: string | null }>();
-    ipc.validateToken.mockReturnValueOnce(pending.promise);
-    const { wrapper } = await renderSettings();
-    const input = wrapper.get<HTMLInputElement>("input[name='hiker-token']");
-
-    await input.setValue("fresh-token");
-    await wrapper.get("button[aria-label='Show token']").trigger("click");
-    expect(input.attributes("type")).toBe("text");
-
-    await wrapper.get("[data-testid='token-form']").trigger("submit");
-    await nextTick();
-
-    expect(input.attributes("type")).toBe("password");
-    expect(input.element.value).toBe("fresh-token");
-    expect(wrapper.get("button[aria-label='Show token']").attributes("disabled")).toBeDefined();
-
-    pending.resolve({ requests: 99, rate: null, amount: null, currency: null });
-    await flushPromises();
-    expect(input.element.value).toBe("");
-    expect(input.attributes("type")).toBe("password");
-
-    await input.setValue("next-token");
-    expect(input.attributes("type")).toBe("password");
-  });
-
-  it("does not validate empty or whitespace-only replacement tokens on direct submit", async () => {
-    const { wrapper } = await renderSettings();
-    const form = wrapper.get("[data-testid='token-form']");
-    const input = wrapper.get<HTMLInputElement>("input[name='hiker-token']");
-
-    await form.trigger("submit");
-    await nextTick();
-    await input.setValue("   ");
-    await form.trigger("submit");
-    await nextTick();
-
-    expect(ipc.validateToken).not.toHaveBeenCalled();
-    expect(wrapper.find("[data-testid='token-success']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='token-error']").exists()).toBe(false);
-    expect(wrapper.get("[data-testid='replace-token']").text()).toBe("Replace token");
-    expect(wrapper.get("[data-testid='replace-token']").attributes("disabled")).toBeDefined();
   });
 
   it("labels the proxy input and shows only the safe stored hint", async () => {
@@ -251,8 +147,6 @@ describe("Settings Library registration warning", () => {
 
   it("applies a trimmed replacement proxy and updates the safe stored hint", async () => {
     ipc.setProxy.mockResolvedValue({
-      has_token: true,
-      token_hint: "***old1",
       has_proxy: true,
       proxy_hint: "socks5h://***@new-proxy.example:1080/",
       dest_dir: "/archive/old",
@@ -277,14 +171,12 @@ describe("Settings Library registration warning", () => {
     expect(input.element.value).toBe("");
     expect(wrapper.html()).not.toContain("alice:secret");
     expect(wrapper.get("[data-testid='proxy-success']").text()).toBe(
-      "Proxy applied to HikerAPI and Instagram CDN",
+      "Proxy applied to Instagram pages and media",
     );
   });
 
   it("clears a configured proxy and shows a direct connection", async () => {
     ipc.setProxy.mockResolvedValue({
-      has_token: true,
-      token_hint: "***old1",
       has_proxy: false,
       proxy_hint: null,
       dest_dir: "/archive/old",
@@ -376,16 +268,12 @@ describe("Settings Library registration warning", () => {
 
   it("keeps a newer proxy when a delayed sidecar response arrives", async () => {
     const proxyRequest = deferred<{
-      has_token: boolean;
-      token_hint: string | null;
       has_proxy: boolean;
       proxy_hint: string | null;
       dest_dir: string;
       sidecar: boolean;
     }>();
     const sidecarRequest = deferred<{
-      has_token: boolean;
-      token_hint: string | null;
       has_proxy: boolean;
       proxy_hint: string | null;
       dest_dir: string;
@@ -400,8 +288,6 @@ describe("Settings Library registration warning", () => {
     await wrapper.get<HTMLInputElement>('input[type="checkbox"]').setValue(false);
 
     proxyRequest.resolve({
-      has_token: true,
-      token_hint: "***old1",
       has_proxy: true,
       proxy_hint: "http://***@new-proxy.example:8080/",
       dest_dir: "/archive/old",
@@ -409,8 +295,6 @@ describe("Settings Library registration warning", () => {
     });
     await flushPromises();
     sidecarRequest.resolve({
-      has_token: true,
-      token_hint: "***old1",
       has_proxy: true,
       proxy_hint: "socks5h://***@proxy.example:1080/",
       dest_dir: "/archive/old",
@@ -422,68 +306,8 @@ describe("Settings Library registration warning", () => {
     expect(app.sidecar).toBe(false);
   });
 
-  it("keeps a newer proxy when a delayed token config snapshot arrives", async () => {
-    const refreshedTokenState = deferred<{
-      has_token: boolean;
-      token_hint: string | null;
-      has_proxy: boolean;
-      proxy_hint: string | null;
-      dest_dir: string;
-      sidecar: boolean;
-    }>();
-    const proxyRequest = deferred<{
-      has_token: boolean;
-      token_hint: string | null;
-      has_proxy: boolean;
-      proxy_hint: string | null;
-      dest_dir: string;
-      sidecar: boolean;
-    }>();
-    ipc.validateToken.mockResolvedValue({ requests: 99, rate: null, amount: null, currency: null });
-    ipc.configState.mockImplementationOnce(async () => ({
-      has_token: true,
-      token_hint: "***old1",
-      has_proxy: true,
-      proxy_hint: "socks5h://***@proxy.example:1080/",
-      dest_dir: "/archive/old",
-      sidecar: true,
-    })).mockReturnValueOnce(refreshedTokenState.promise);
-    ipc.setProxy.mockReturnValueOnce(proxyRequest.promise);
-    const { app, wrapper } = await renderSettings();
-
-    await wrapper.get<HTMLInputElement>("input[name='hiker-token']").setValue("fresh-token");
-    await wrapper.get("[data-testid='token-form']").trigger("submit");
-    await flushPromises();
-    await wrapper.get<HTMLInputElement>("#network-proxy-url").setValue("http://new-proxy.example:8080");
-    await wrapper.get("[data-testid='proxy-form']").trigger("submit");
-
-    proxyRequest.resolve({
-      has_token: true,
-      token_hint: "***old1",
-      has_proxy: true,
-      proxy_hint: "http://***@new-proxy.example:8080/",
-      dest_dir: "/archive/old",
-      sidecar: true,
-    });
-    await flushPromises();
-    refreshedTokenState.resolve({
-      has_token: true,
-      token_hint: "***new9",
-      has_proxy: true,
-      proxy_hint: "socks5h://***@proxy.example:1080/",
-      dest_dir: "/archive/old",
-      sidecar: true,
-    });
-    await flushPromises();
-
-    expect(app.tokenHint).toBe("***new9");
-    expect(app.proxyHint).toBe("http://***@new-proxy.example:8080/");
-  });
-
   it("keeps one proxy request pending across an unmount and remount", async () => {
     const proxyRequest = deferred<{
-      has_token: boolean;
-      token_hint: string | null;
       has_proxy: boolean;
       proxy_hint: string | null;
       dest_dir: string;
@@ -506,8 +330,6 @@ describe("Settings Library registration warning", () => {
     expect(second.wrapper.get("[data-testid='proxy-form']").attributes("aria-busy")).toBe("true");
 
     proxyRequest.resolve({
-      has_token: true,
-      token_hint: "***old1",
       has_proxy: true,
       proxy_hint: "http://***@new-proxy.example:8080/",
       dest_dir: "/archive/old",
@@ -555,57 +377,6 @@ describe("Settings Library registration warning", () => {
     expect(error).not.toContain("/Users/private");
   });
 
-  it("validates a trimmed token before replacing the hint and balance", async () => {
-    const replacementBalance = { requests: 99, rate: 0.001, amount: 1, currency: "USD" };
-    ipc.validateToken.mockResolvedValue(replacementBalance);
-    ipc.configState
-      .mockResolvedValueOnce({
-        has_token: true,
-        token_hint: "***old1",
-        has_proxy: true,
-        proxy_hint: "socks5h://***@proxy.example:1080/",
-        dest_dir: "/archive/old",
-        sidecar: true,
-      })
-      .mockResolvedValueOnce({
-        has_token: true,
-        token_hint: "***new9",
-        has_proxy: true,
-        proxy_hint: "socks5h://***@proxy.example:1080/",
-        dest_dir: "/archive/old",
-        sidecar: true,
-      });
-    const { app, wrapper } = await renderSettings();
-    const input = wrapper.get<HTMLInputElement>("input[name='hiker-token']");
-    await input.setValue("  fresh-token  ");
-
-    await wrapper.get("[data-testid='token-form']").trigger("submit");
-    await flushPromises();
-
-    expect(ipc.validateToken).toHaveBeenCalledWith("fresh-token");
-    expect(ipc.configState).toHaveBeenCalledTimes(2);
-    expect(app.tokenHint).toBe("***new9");
-    expect(app.balance).toEqual(replacementBalance);
-    expect(input.element.value).toBe("");
-    expect(wrapper.get("[data-testid='token-success']").text()).toContain("99 req");
-  });
-
-  it("keeps the old token state and entered value when validation fails", async () => {
-    ipc.validateToken.mockRejectedValue(new Error("Invalid token"));
-    const { app, wrapper } = await renderSettings();
-    const previousBalance = app.balance;
-    const input = wrapper.get<HTMLInputElement>("input[name='hiker-token']");
-    await input.setValue("bad-token");
-
-    await wrapper.get("[data-testid='token-form']").trigger("submit");
-    await flushPromises();
-
-    expect(app.tokenHint).toBe("***old1");
-    expect(app.balance).toBe(previousBalance);
-    expect(input.element.value).toBe("bad-token");
-    expect(wrapper.get("[data-testid='token-error']").text()).toContain("Invalid token");
-  });
-
   it("keeps the previous destination and shows a sanitized error when saving fails", async () => {
     dialog.open.mockResolvedValue("/archive/new");
     ipc.saveSettings.mockRejectedValue(
@@ -643,8 +414,6 @@ describe("Settings Library registration warning", () => {
     ipc.saveSettings
       .mockReturnValueOnce(firstSave.promise)
       .mockImplementation(async (opts: { sidecar?: boolean }) => ({
-        has_token: false,
-        token_hint: null,
         has_proxy: true,
         proxy_hint: "socks5h://***@proxy.example:1080/",
         dest_dir: "/archive/old",

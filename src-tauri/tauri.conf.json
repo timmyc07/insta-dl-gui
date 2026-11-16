@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "insta-dl-gui",
+  "productName": "insta-dl-gui Local",
   "version": "0.7.0",
-  "identifier": "io.github.subzeroid.insta-dl-gui",
+  "identifier": "io.github.insta-dl-gui.local",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "insta-dl-gui",
+        "title": "insta-dl-gui Local",
         "width": 1000,
         "height": 700,
         "minWidth": 860,

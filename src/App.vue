@@ -1,27 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { onMounted } from "vue";
 import { useAppStore } from "./stores/app";
 import { useJobsStore } from "./stores/jobs";
-import { formatBalance } from "./lib/ipc";
 import AppBrand from "./components/AppBrand.vue";
 import DownloadActivityBar from "./components/DownloadActivityBar.vue";
 import RemoteMediaFailureBanner from "./components/RemoteMediaFailureBanner.vue";
 
 const app = useAppStore();
 const jobs = useJobsStore();
-const route = useRoute();
-const router = useRouter();
 
 onMounted(async () => {
   await app.init();
   jobs.init().catch(() => {});
-  if (!app.hasToken && route.path !== "/onboarding") {
-    router.push("/onboarding");
-  }
 });
-
-const showChrome = computed(() => route.path !== "/onboarding");
 </script>
 
 <template>
@@ -29,10 +20,7 @@ const showChrome = computed(() => route.path !== "/onboarding");
     Loading…
   </div>
   <div v-else class="flex h-full flex-col">
-    <header
-      v-if="showChrome"
-      class="flex min-w-0 flex-col items-stretch gap-2 border-b border-line bg-surface-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-    >
+    <header class="flex min-w-0 flex-col items-stretch gap-2 border-b border-line bg-surface-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <AppBrand :version="app.appVersion" class="shrink-0" />
       <nav
         aria-label="Primary"
@@ -53,20 +41,12 @@ const showChrome = computed(() => route.path !== "/onboarding");
         >
           {{ r.label }}
         </RouterLink>
-        <button
-          class="ml-2 shrink-0 rounded-full border border-line px-3 py-1 text-xs tabular-nums text-slate-300 hover:bg-surface-3 sm:ml-3"
-          title="HikerAPI balance — click to refresh"
-          @click="app.refreshBalance()"
-        >
-          <template v-if="app.balance">{{ formatBalance(app.balance) }}</template>
-          <template v-else>— req</template>
-        </button>
       </nav>
     </header>
-    <RemoteMediaFailureBanner v-if="showChrome" />
+    <RemoteMediaFailureBanner />
     <main id="app-main-content" class="min-h-0 flex-1 overflow-y-auto" tabindex="-1">
       <RouterView />
     </main>
-    <DownloadActivityBar v-if="showChrome" />
+    <DownloadActivityBar />
   </div>
 </template>

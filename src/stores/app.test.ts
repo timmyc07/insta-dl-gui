@@ -14,8 +14,6 @@ vi.mock("../lib/ipc", () => ({
 }));
 
 const configStateFixture: ipc.ConfigState = {
-  has_token: false,
-  token_hint: null,
   has_proxy: false,
   proxy_hint: null,
   dest_dir: "",

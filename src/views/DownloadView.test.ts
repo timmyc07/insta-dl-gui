@@ -33,7 +33,6 @@ const publicPreview = {
     full_name: "Nike",
     media_count: 10,
     follower_count: 100,
-    is_private: false,
     is_verified: true,
     avatar_url: "https://cdninstagram.com/avatar.jpg",
   },
@@ -128,22 +127,5 @@ describe("DownloadView concurrency", () => {
     await flushPromises();
   });
 
-  it("blocks an empty private-profile download", async () => {
-    ipc.resolveInput.mockResolvedValue({ kind: "profile", username: "nike" });
-    ipc.fetchProfile.mockResolvedValue({
-      ...publicPreview,
-      profile: { ...publicPreview.profile, is_private: true },
-    });
-    const wrapper = render();
-    await wrapper.get("input").setValue("nike");
-    await wrapper.get("form").trigger("submit");
-    await flushPromises();
-    const avatar = wrapper.get('input[type="checkbox"]');
-    await avatar.setValue(false);
-    const download = wrapper.findAll("button").find((button) => button.text() === "Download");
 
-    expect(download?.attributes("disabled")).toBeDefined();
-    await download!.trigger("click");
-    expect(ipc.enqueueProfileDownload).not.toHaveBeenCalled();
-  });
 });

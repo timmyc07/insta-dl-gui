@@ -13,10 +13,6 @@ import {
   enqueueProfileDownload,
   ensureConfiguredLibraryRoot,
   fetchProfile,
-  fetchProfileSummary,
-  fetchReels,
-  fetchRelationships,
-  fetchStories,
   getLibraryItem,
   libraryMediaUrl,
   listLibraryRoots,
@@ -27,7 +23,6 @@ import {
   requestLibraryPreviewAccess,
   remoteMediaUrl,
   revealLibraryFile,
-  searchRelationships,
   configState,
   saveSettings,
   setProxy,
@@ -65,26 +60,6 @@ describe("app plugin mock", () => {
 });
 
 describe("profile pagination mock", () => {
-  it("provides cursor-paged relationship lists and server-side search", async () => {
-    installTauriMock();
-
-    await expect(fetchProfileSummary("natgeo")).resolves.toMatchObject({
-      pk: "25025320",
-      username: "natgeo",
-      follower_count: 713_000_000,
-      following_count: 234,
-    });
-    const first = await fetchRelationships("25025320", "following", null);
-    const second = await fetchRelationships("25025320", "following", first.next_cursor);
-    expect(first.users).toHaveLength(12);
-    expect(first.next_cursor).toBe("following-cursor");
-    expect(second.users).toHaveLength(12);
-    expect(second.next_cursor).toBeNull();
-    expect(new Set([...first.users, ...second.users].map((user) => user.pk)).size).toBe(24);
-
-    const results = await searchRelationships("25025320", "following", "meta");
-    expect(results.map((user) => user.username)).toEqual(["meta", "metaglasses"]);
-  });
 
   it("permits only registered demo remote-media fixtures and revokes them on dispose", async () => {
     installTauriMock();
@@ -92,37 +67,31 @@ describe("profile pagination mock", () => {
       username: "instagram",
       endCursor: null,
     })) as ProfilePreview;
-    const stories = await fetchStories("42");
     const avatar = profile.profile.avatar_url ?? "";
     const thumbnail = profile.recent_posts[0]?.thumbnail_url ?? "";
-    const storyThumbnail = stories[0]?.thumb_url ?? "";
 
     expect(remoteMediaUrl(avatar)).toBe(avatar);
     expect(remoteMediaUrl(thumbnail)).toBe(thumbnail);
-    expect(remoteMediaUrl(storyThumbnail)).toBe(storyThumbnail);
     expect(remoteMediaUrl("data:image/svg+xml,%3Csvg%3Eunregistered%3C/svg%3E")).toBe("");
 
     uninstallTauriMock();
     expect(remoteMediaUrl(avatar)).toBe("");
     expect(remoteMediaUrl(thumbnail)).toBe("");
-    expect(remoteMediaUrl(storyThumbnail)).toBe("");
   });
 
   it("keeps remote-media failure demo sources original, distinct, and outside healthy fixtures", async () => {
     window.history.replaceState({}, "", "/explore?mock=1&demo=remote-media-failure");
     installTauriMock();
 
-    const first = await fetchProfile("preview_demo", null);
-    const second = await fetchProfile("preview_demo", first.end_cursor);
+    const first = await fetchProfile("preview_demo");
     const sources = [
       first.profile.avatar_url ?? "",
       ...first.recent_posts.map((post) => post.thumbnail_url ?? ""),
-      ...second.recent_posts.map((post) => post.thumbnail_url ?? ""),
     ];
     const expectedSources = [
       "https://cdninstagram.com/mock-failure/avatar.jpg",
       ...Array.from(
-        { length: 24 },
+        { length: 6 },
         (_, index) => `https://cdninstagram.com/mock-failure/post-${index}.jpg`,
       ),
     ];
@@ -132,12 +101,8 @@ describe("profile pagination mock", () => {
       full_name: "Preview Demo",
       media_count: 24,
       follower_count: 1200,
-      following_count: 40,
     });
-    expect(first.recent_posts).toHaveLength(12);
-    expect(first.end_cursor).toBe("cursor");
-    expect(second.recent_posts).toHaveLength(12);
-    expect(second.end_cursor).toBeNull();
+    expect(first.recent_posts).toHaveLength(6);
     expect(sources).toEqual(expectedSources);
     expect(new Set(sources).size).toBe(expectedSources.length);
     expect(sources.every((source) => source.startsWith("https://cdninstagram.com/mock-failure/")))
@@ -153,7 +118,7 @@ describe("profile pagination mock", () => {
     );
     installTauriMock();
 
-    const profile = await fetchProfile("adidas", null);
+    const profile = await fetchProfile("adidas");
     const sources = [
       profile.profile.avatar_url ?? "",
       ...profile.recent_posts.map((post) => post.thumbnail_url ?? ""),
@@ -164,7 +129,6 @@ describe("profile pagination mock", () => {
       full_name: "Instagram",
       media_count: 7421,
       follower_count: 713_000_000,
-      following_count: 234,
     });
     expect(sources.every((source) => source.startsWith("data:image/svg+xml,"))).toBe(true);
     expect(sources.every((source) => !source.includes("/mock-failure/"))).toBe(true);
@@ -222,45 +186,6 @@ describe("profile pagination mock", () => {
     ).resolves.toBeNull();
   });
 
-  it("returns a distinct final page for the supplied end cursor", async () => {
-    installTauriMock();
-    const first = (await invoke()("fetch_profile", {
-      username: "instagram",
-      endCursor: null,
-    })) as ProfilePreview;
-    const second = (await invoke()("fetch_profile", {
-      username: "instagram",
-      endCursor: first.end_cursor,
-    })) as ProfilePreview;
-
-    const allIds = [...first.recent_posts, ...second.recent_posts].map((post) => post.pk);
-    expect(first.end_cursor).toBe("cursor");
-    expect(second.end_cursor).toBeNull();
-    expect(first.recent_posts).toHaveLength(12);
-    expect(second.recent_posts).toHaveLength(12);
-    expect(new Set(allIds).size).toBe(24);
-  });
-
-  it("returns cursor-paged reels independently from profile posts", async () => {
-    installTauriMock();
-    const first = (await invoke()("fetch_reels", {
-      userId: "42",
-      endCursor: null,
-    })) as { posts: Post[]; end_cursor: string | null };
-    const second = (await invoke()("fetch_reels", {
-      userId: "42",
-      endCursor: first.end_cursor,
-    })) as { posts: Post[]; end_cursor: string | null };
-
-    expect(first.posts).toHaveLength(11);
-    expect(
-      first.posts.every((post) =>
-        post.resources.some((resource) => resource.kind === "video"),
-      ),
-    ).toBe(true);
-    expect(first.end_cursor).toBe("reels-cursor");
-    expect(second.end_cursor).toBeNull();
-  });
 
   it("supports exact fetched-media downloads in the Explore demo", async () => {
     installTauriMock();
@@ -360,89 +285,6 @@ describe("download journey mock", () => {
     ]);
   });
 
-  it("records direct story evidence with numeric PKs and exact video kinds", async () => {
-    installTauriMock();
-    const stories = await fetchStories("42");
-    await downloadDirect(
-      "nike",
-      "stories",
-      stories.map((story) => ({ pk: story.pk, taken_at: story.taken_at, url: story.media_url })),
-    );
-    await vi.runAllTimersAsync();
-
-    const statuses = await checkDownloadStatuses(
-      stories.map((story) => ({ namespace: "story", pk: story.pk, resources: [story.kind] })),
-    );
-    expect(statuses).toEqual(
-      stories.map((story) => ({
-        namespace: "story",
-        pk: story.pk,
-        state: "downloaded",
-        available_resources: 1,
-        expected_resources: 1,
-      })),
-    );
-  });
-
-  it("enumerates the same deterministic posts, reels, and stories for Profile All", async () => {
-    installTauriMock();
-    const { events, unlisten } = await collectJobEvents();
-    const firstPosts = await fetchProfile("nike", null);
-    const secondPosts = await fetchProfile("nike", firstPosts.end_cursor);
-    const firstReels = await fetchReels("42", null);
-    const secondReels = await fetchReels("42", firstReels.end_cursor);
-    const stories = await fetchStories("42");
-    const posts = [...firstPosts.recent_posts, ...secondPosts.recent_posts];
-    const reels = [...firstReels.posts, ...secondReels.posts];
-
-    await enqueueProfileDownload("nike", {
-      posts: true,
-      reels: true,
-      stories: true,
-      highlights: false,
-      avatar: false,
-    });
-    await vi.runAllTimersAsync();
-
-    const completed = events.find((event) => event.state === "done");
-    expect(completed).toEqual(
-      expect.objectContaining({
-        count: 3,
-        outputs: [
-          expect.objectContaining({ basename: "nike_post_1.jpg", kind: "photo", ordinal: 0 }),
-          expect.objectContaining({ basename: "nike_reel_1.mp4", kind: "video", ordinal: 0 }),
-          expect.objectContaining({ basename: "nike_story_1.jpg", kind: "photo", ordinal: 0 }),
-        ],
-      }),
-    );
-
-    const statuses = await checkDownloadStatuses([
-      ...posts.map((post) => ({
-        namespace: "post" as const,
-        pk: post.pk,
-        resources: post.resources.map((resource) => resource.kind),
-      })),
-      ...reels.map((post) => ({
-        namespace: "post" as const,
-        pk: post.pk,
-        resources: post.resources.map((resource) => resource.kind),
-      })),
-      ...stories.map((story) => ({
-        namespace: "story" as const,
-        pk: story.pk,
-        resources: [story.kind],
-      })),
-    ]);
-
-    expect(statuses).toHaveLength(posts.length + reels.length + stories.length);
-    expect(statuses.every((status) => status.state === "downloaded")).toBe(true);
-    expect(statuses.find((status) => status.pk === stories[1].pk)).toMatchObject({
-      namespace: "story",
-      available_resources: 1,
-      expected_resources: 1,
-    });
-    await unlisten();
-  });
 
   it("shares the post namespace between fetched post and reel downloads", async () => {
     installTauriMock();
@@ -692,8 +534,6 @@ describe("download journey mock", () => {
     const third = await enqueueProfileDownload("nike", {
       posts: true,
       reels: false,
-      stories: false,
-      highlights: false,
       avatar: false,
     });
 
@@ -730,16 +570,17 @@ describe("download journey mock", () => {
     const profileId = await enqueueProfileDownload("nike", {
       posts: true,
       reels: false,
-      stories: false,
-      highlights: false,
       avatar: false,
     });
     const postId = await downloadPost("POSTCODE");
-    const stories = await fetchStories("42");
     const directId = await downloadDirect(
       "nike",
       "stories",
-      stories.map((story) => ({ pk: story.pk, taken_at: story.taken_at, url: story.media_url })),
+      [
+        { pk: "111", url: "https://cdninstagram.com/first.jpg" },
+        { pk: "112", url: "https://cdninstagram.com/second.mp4" },
+        { pk: "113", url: "https://cdninstagram.com/third.jpg" },
+      ],
     );
 
     await vi.runAllTimersAsync();
@@ -756,34 +597,6 @@ describe("download journey mock", () => {
     await unlisten();
   });
 
-  it("keeps story fixtures browser-safe while preserving fixture media kinds", async () => {
-    installTauriMock();
-    const { events, unlisten } = await collectJobEvents();
-    const stories = await fetchStories("42");
-
-    expect(stories.every((story) => /^\d+$/.test(story.pk))).toBe(true);
-    expect(stories.every((story) => story.media_url === "" || story.media_url.startsWith("data:")))
-      .toBe(true);
-    expect(stories.every((story) => story.thumb_url?.startsWith("data:image/svg+xml,")))
-      .toBe(true);
-    const jobId = await downloadDirect(
-      "nike",
-      "stories",
-      stories.map((story) => ({ pk: story.pk, taken_at: story.taken_at, url: story.media_url })),
-    );
-
-    await vi.advanceTimersByTimeAsync(15);
-    expect(events.at(-1)).toEqual(
-      expect.objectContaining({ job_id: jobId, state: "downloading", file_name: "9200001_1.jpg" }),
-    );
-    await vi.runAllTimersAsync();
-    expect(events.at(-1)?.outputs?.map((output) => output.kind)).toEqual([
-      "photo",
-      "video",
-      "photo",
-    ]);
-    await unlisten();
-  });
 
   it("rejects malformed download input without allocating a job or emitting progress", async () => {
     installTauriMock();
@@ -793,8 +606,6 @@ describe("download journey mock", () => {
     const validOptions = {
       posts: true,
       reels: false,
-      stories: false,
-      highlights: false,
       avatar: false,
       max_posts: null,
     };

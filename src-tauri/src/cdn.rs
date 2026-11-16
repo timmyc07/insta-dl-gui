@@ -910,6 +910,7 @@ mod tests {
         assert!(matches!(err, CdnError::Cancelled), "{err}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn mtime_is_preserved_from_taken_at() {
         let dir = tmp_dir("mtime");

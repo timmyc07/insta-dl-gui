@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use tempfile::TempDir;
-use wiremock::matchers::{method, path, query_param, query_param_is_missing};
+use wiremock::matchers::path;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
@@ -110,7 +110,6 @@ impl Fixture {
 
     async fn run(&self, post: &Post, sidecar: bool) -> TestResult {
         let cfg = Config {
-            token: None,
             dest_dir: self.root.to_string_lossy().into_owned(),
             sidecar,
             proxy_url: None,
@@ -155,7 +154,6 @@ impl Fixture {
         cancel: Option<tokio::sync::watch::Receiver<bool>>,
     ) -> Result<CompletedJob, JobFail> {
         let cfg = Config {
-            token: None,
             dest_dir: self.root.to_string_lossy().into_owned(),
             sidecar,
             proxy_url: None,
@@ -214,40 +212,6 @@ impl Fixture {
             .get_library_item(page.items[0].id)
             .unwrap()
             .unwrap()
-    }
-
-    async fn run_profile(
-        &self,
-        client: Arc<crate::hiker::HikerClient>,
-        profile: &Profile,
-        opts: &ProfileOptions,
-    ) -> CompletedJob {
-        let cfg = Config {
-            token: None,
-            dest_dir: self.root.to_string_lossy().into_owned(),
-            sidecar: false,
-            proxy_url: None,
-        };
-        run_profile_job(
-            &client,
-            &self.http,
-            &self.catalog,
-            &self.root,
-            &cfg,
-            &NoopProgress,
-            &self.root.join(&profile.username),
-            profile,
-            opts,
-            Vec::new(),
-            Vec::new(),
-            true,
-            None,
-        )
-        .await
-        .unwrap_or_else(|failure| match failure {
-            JobFail::Cancelled => panic!("profile download was unexpectedly cancelled"),
-            JobFail::Fatal(error) => panic!("profile download failed: {error}"),
-        })
     }
 }
 
@@ -921,84 +885,8 @@ fn profile() -> Profile {
         full_name: Some("Nike".into()),
         media_count: 3,
         follower_count: Some(100),
-        following_count: Some(25),
-        is_private: false,
         is_verified: true,
         avatar_url: None,
-    }
-}
-
-fn reel_payload(pk: &str, code: &str) -> serde_json::Value {
-    serde_json::json!({
-        "pk": pk,
-        "code": code,
-        "media_type": 2,
-        "taken_at": 1_700_000_000,
-        "video_versions": [],
-        "image_versions2": {"candidates": []}
-    })
-}
-
-fn downloadable_reel_payload(server: &MockServer, pk: &str, code: &str) -> serde_json::Value {
-    serde_json::json!({
-        "pk": pk,
-        "code": code,
-        "media_type": 2,
-        "taken_at": 1_700_000_000,
-        "video_versions": [{
-            "url": format!("{}/cdn/{pk}", server.uri()),
-            "width": 1080
-        }],
-        "image_versions2": {"candidates": []}
-    })
-}
-
-fn downloadable_photo_payload(server: &MockServer, pk: &str, code: &str) -> serde_json::Value {
-    serde_json::json!({
-        "pk": pk,
-        "code": code,
-        "media_type": 1,
-        "taken_at": 1_700_000_000,
-        "image_versions2": {"candidates": [{
-            "url": format!("{}/cdn/{pk}", server.uri()),
-            "width": 1080
-        }]}
-    })
-}
-
-fn downloadable_carousel_payload(server: &MockServer, pk: &str, code: &str) -> serde_json::Value {
-    serde_json::json!({
-        "pk": pk,
-        "code": code,
-        "media_type": 8,
-        "taken_at": 1_700_000_001,
-        "carousel_media": [
-            {
-                "media_type": 1,
-                "image_versions2": {"candidates": [{
-                    "url": format!("{}/cdn/{pk}-1", server.uri()),
-                    "width": 1080
-                }]}
-            },
-            {
-                "media_type": 2,
-                "video_versions": [{
-                    "url": format!("{}/cdn/{pk}-2", server.uri()),
-                    "width": 1080
-                }]
-            }
-        ]
-    })
-}
-
-fn reels_only(max_posts: Option<u64>) -> ProfileOptions {
-    ProfileOptions {
-        posts: false,
-        reels: true,
-        stories: false,
-        highlights: false,
-        avatar: false,
-        max_posts,
     }
 }
 
@@ -1006,19 +894,6 @@ fn reels_only(max_posts: Option<u64>) -> ProfileOptions {
 async fn profile_all_cancellation_catalogs_current_partial_carousel_and_keeps_prior_post() {
     let server = MockServer::start().await;
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-    Mock::given(method("GET"))
-        .and(path("/v1/user/medias/chunk"))
-        .and(query_param("user_id", "42"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            [
-                downloadable_photo_payload(&server, "7101", "PRIOR"),
-                downloadable_carousel_payload(&server, "7102", "CURRENT")
-            ],
-            null
-        ])))
-        .expect(1)
-        .mount(&server)
-        .await;
     mount_media(&server, "/cdn/7101", "image/jpeg", &JPEG).await;
     mount_media(&server, "/cdn/7102-1", "image/jpeg", &JPEG).await;
     Mock::given(path("/cdn/7102-2"))
@@ -1032,12 +907,7 @@ async fn profile_all_cancellation_catalogs_current_partial_carousel_and_keeps_pr
         .mount(&server)
         .await;
     let fixture = Fixture::new();
-    let client = Arc::new(crate::hiker::HikerClient::with_base_url(
-        "token".into(),
-        server.uri(),
-    ));
     let cfg = Config {
-        token: None,
         dest_dir: fixture.root.to_string_lossy().into_owned(),
         sidecar: true,
         proxy_url: None,
@@ -1045,14 +915,11 @@ async fn profile_all_cancellation_catalogs_current_partial_carousel_and_keeps_pr
     let opts = ProfileOptions {
         posts: true,
         reels: false,
-        stories: false,
-        highlights: false,
         avatar: false,
         max_posts: None,
     };
 
     let result = run_profile_job(
-        &client,
         &fixture.http,
         &fixture.catalog,
         &fixture.root,
@@ -1061,8 +928,26 @@ async fn profile_all_cancellation_catalogs_current_partial_carousel_and_keeps_pr
         &fixture.root.join("nike"),
         &profile(),
         &opts,
-        Vec::new(),
-        Vec::new(),
+        &[
+            post(
+                "7101",
+                "PRIOR",
+                vec![resource(&server, "/cdn/7101", MediaKind::Photo)],
+            ),
+            Post {
+                resources: vec![
+                    MediaResource {
+                        url: format!("{}/cdn/7102-1", server.uri()),
+                        kind: MediaKind::Photo,
+                    },
+                    MediaResource {
+                        url: format!("{}/cdn/7102-2", server.uri()),
+                        kind: MediaKind::Video,
+                    },
+                ],
+                ..post("7102", "CURRENT", vec![])
+            },
+        ],
         true,
         Some(cancel_rx),
     )
@@ -1113,197 +998,6 @@ async fn profile_all_cancellation_catalogs_current_partial_carousel_and_keeps_pr
     assert_eq!(current_status.state, DownloadStatusState::Partial);
     assert_eq!(current_status.available_resources, 1);
     assert_eq!(current_status.expected_resources, 2);
-}
-
-#[tokio::test]
-async fn reels_only_profile_job_uses_clips_and_caps_by_reel_count() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user/medias/chunk"))
-        .respond_with(ResponseTemplate::new(500))
-        .expect(0)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user/clips/chunk"))
-        .and(query_param("user_id", "42"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            [
-                reel_payload("101", "ONE"),
-                reel_payload("102", "TWO"),
-                reel_payload("103", "THREE")
-            ],
-            "next-page"
-        ])))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let fixture = Fixture::new();
-    let client = Arc::new(crate::hiker::HikerClient::with_base_url(
-        "token".into(),
-        server.uri(),
-    ));
-
-    let completed = fixture
-        .run_profile(client, &profile(), &reels_only(Some(2)))
-        .await;
-
-    assert_eq!(completed.outcome.files_written, 0);
-    assert!(completed.resource_errors.is_empty());
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.url.path() == "/v1/user/clips/chunk")
-            .count(),
-        1
-    );
-    assert!(requests
-        .iter()
-        .all(|request| request.url.path() != "/cdn/103"));
-}
-
-#[tokio::test]
-async fn reels_only_profile_job_stops_when_clips_cursor_repeats() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user/clips/chunk"))
-        .and(query_param_is_missing("end_cursor"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!([[reel_payload("201", "FIRST")], "same"])),
-        )
-        .up_to_n_times(1)
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user/clips/chunk"))
-        .and(query_param("end_cursor", "same"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!([[reel_payload("202", "SECOND")], "same"])),
-        )
-        .up_to_n_times(1)
-        .expect(1)
-        .mount(&server)
-        .await;
-    let fixture = Fixture::new();
-    let client = Arc::new(crate::hiker::HikerClient::with_base_url(
-        "token".into(),
-        server.uri(),
-    ));
-
-    let completed = fixture
-        .run_profile(client, &profile(), &reels_only(None))
-        .await;
-
-    assert!(completed.resource_errors.is_empty());
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.url.path() == "/v1/user/clips/chunk")
-            .count(),
-        2
-    );
-}
-
-#[tokio::test]
-async fn reels_only_profile_job_stops_when_clips_cursors_cycle() {
-    let server = MockServer::start().await;
-    for (cursor, pk, next) in [
-        (None, "301", "a"),
-        (Some("a"), "302", "b"),
-        (Some("b"), "303", "a"),
-    ] {
-        let mut mock = Mock::given(method("GET"))
-            .and(path("/v1/user/clips/chunk"))
-            .and(query_param("user_id", "42"));
-        mock = match cursor {
-            Some(value) => mock.and(query_param("end_cursor", value)),
-            None => mock.and(query_param_is_missing("end_cursor")),
-        };
-        mock.respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!([[reel_payload(pk, pk)], next])),
-        )
-        .expect(1)
-        .mount(&server)
-        .await;
-    }
-    let fixture = Fixture::new();
-    let client = Arc::new(crate::hiker::HikerClient::with_base_url(
-        "token".into(),
-        server.uri(),
-    ));
-
-    let completed = fixture
-        .run_profile(client, &profile(), &reels_only(None))
-        .await;
-
-    assert!(completed.resource_errors.is_empty());
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.url.path() == "/v1/user/clips/chunk")
-            .count(),
-        3
-    );
-}
-
-#[tokio::test]
-async fn reels_only_profile_job_caps_by_unique_reel_count_across_overlapping_pages() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user/clips/chunk"))
-        .and(query_param_is_missing("end_cursor"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            [
-                downloadable_reel_payload(&server, "401", "ONE"),
-                downloadable_reel_payload(&server, "402", "TWO")
-            ],
-            "next"
-        ])))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user/clips/chunk"))
-        .and(query_param("end_cursor", "next"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            [
-                downloadable_reel_payload(&server, "402", "TWO"),
-                downloadable_reel_payload(&server, "403", "THREE")
-            ],
-            null
-        ])))
-        .expect(1)
-        .mount(&server)
-        .await;
-    for pk in ["401", "402", "403"] {
-        Mock::given(method("GET"))
-            .and(path(format!("/cdn/{pk}")))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(MP4))
-            .expect(1)
-            .mount(&server)
-            .await;
-    }
-    let fixture = Fixture::new();
-    let client = Arc::new(crate::hiker::HikerClient::with_base_url(
-        "token".into(),
-        server.uri(),
-    ));
-
-    let completed = fixture
-        .run_profile(client, &profile(), &reels_only(Some(3)))
-        .await;
-
-    assert_eq!(completed.outcome.files_written, 3);
-    assert_eq!(completed.requested_items, None);
-    assert_eq!(completed.outputs.len(), 3);
-    assert!(completed.resource_errors.is_empty());
 }
 
 fn relative_paths(root: &Path, files: &[DownloadedFile]) -> Vec<String> {
@@ -1870,7 +1564,6 @@ async fn standalone_post_all_failed_after_attempt_refactor_is_concrete_fatal() {
         .await;
     let fixture = Fixture::new();
     let cfg = Config {
-        token: None,
         dest_dir: fixture.root.to_string_lossy().into_owned(),
         sidecar: false,
         proxy_url: None,

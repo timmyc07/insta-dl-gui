@@ -7,15 +7,12 @@ import { useRemoteMediaHealthStore } from "./remoteMediaHealth";
 export const useAppStore = defineStore("app", () => {
   const ready = ref(false);
   const appVersion = ref<string | null>(null);
-  const hasToken = ref(false);
-  const tokenHint = ref<string | null>(null);
   const hasProxy = ref(false);
   const proxyHint = ref<string | null>(null);
   const proxySaving = ref(false);
   const destDir = ref("");
   const sidecar = ref(true);
   const catalogWarning = ref<string | null>(null);
-  const balance = ref<ipc.Balance | null>(null);
 
   async function loadAppVersion() {
     try {
@@ -30,14 +27,6 @@ export const useAppStore = defineStore("app", () => {
     const s = await ipc.configState();
     applyInitialState(s);
     ready.value = true;
-    if (s.has_token) {
-      refreshBalance().catch(() => {});
-    }
-  }
-
-  function applyTokenState(s: ipc.ConfigState) {
-    hasToken.value = s.has_token;
-    tokenHint.value = s.token_hint;
   }
 
   function applyProxyState(s: ipc.ConfigState) {
@@ -46,7 +35,6 @@ export const useAppStore = defineStore("app", () => {
   }
 
   function applyInitialState(s: ipc.ConfigState) {
-    applyTokenState(s);
     applyProxyState(s);
     destDir.value = s.dest_dir;
     sidecar.value = s.sidecar;
@@ -74,33 +62,17 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
-  async function refreshBalance() {
-    balance.value = await ipc.getBalance();
-  }
-
-  async function replaceToken(token: string) {
-    const nextBalance = await ipc.validateToken(token.trim());
-    applyTokenState(await ipc.configState());
-    balance.value = nextBalance;
-    return nextBalance;
-  }
-
   return {
     ready,
     appVersion,
-    hasToken,
-    tokenHint,
     hasProxy,
     proxyHint,
     proxySaving,
     destDir,
     sidecar,
     catalogWarning,
-    balance,
     init,
     saveSettings,
     setProxy,
-    refreshBalance,
-    replaceToken,
   };
 });

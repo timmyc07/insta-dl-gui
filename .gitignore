@@ -33,3 +33,7 @@ site/
 # Build artefacts: a signed bundle must never be committed by accident.
 *.dmg
 *.app/
+
+# Local environment files
+.env
+.env.*

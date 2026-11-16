@@ -2081,6 +2081,7 @@ dependencies = [
  "cap-std",
  "chrono",
  "dirs",
+ "dom_query",
  "filetime",
  "fs2",
  "futures-util",

@@ -1,24 +1,18 @@
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::hiker::HikerClient;
+use crate::instagram::InstagramClient;
 
 pub struct NetworkClients {
-    pub hiker: Option<Arc<HikerClient>>,
+    pub instagram: Arc<InstagramClient>,
     pub cdn: reqwest::Client,
 }
 
 impl NetworkClients {
     pub fn from_config(config: &Config) -> Result<Self, String> {
         let proxy = config.proxy_url.as_deref();
-        let hiker = config
-            .token
-            .as_ref()
-            .map(|token| HikerClient::with_proxy(token.clone(), proxy).map(Arc::new))
-            .transpose()?;
-
         Ok(Self {
-            hiker,
+            instagram: Arc::new(InstagramClient::new(proxy)?),
             cdn: build_cdn_client(proxy)?,
         })
     }

@@ -524,7 +524,6 @@ mod tests {
         let second_archive = tempdir().unwrap();
         let catalog = Catalog::open(directory.path().join("catalog.sqlite3")).unwrap();
         let mut config = Config {
-            token: None,
             dest_dir: first_archive.path().to_string_lossy().into_owned(),
             sidecar: true,
             proxy_url: None,

@@ -226,15 +226,13 @@ fn config_proxy_url_round_trips_raw_value_while_hint_is_redacted() {
 }
 
 #[test]
-fn config_debug_output_does_not_expose_hiker_token_or_proxy_userinfo() {
+fn config_debug_output_does_not_expose_proxy_userinfo() {
     let config = Config {
-        token: Some("raw-hiker-token".to_owned()),
         proxy_url: Some("socks5h://user:secret@proxy.example:1080".to_owned()),
         ..Config::default()
     };
 
     let debug = format!("{config:?}");
-    assert!(!debug.contains("raw-hiker-token"));
     assert!(!debug.contains("user"));
     assert!(!debug.contains("secret"));
 }

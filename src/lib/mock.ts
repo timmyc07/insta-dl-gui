@@ -21,8 +21,6 @@ import type {
   LibraryScanProgress,
   Post,
   ProfileOptions,
-  RelationshipKind,
-  SearchUser,
 } from "./ipc";
 
 type CmdArgs = Record<string, unknown>;
@@ -153,20 +151,6 @@ function mockProfilePosts(pageStart: number, remoteMediaFailureDemo = false): Po
   });
 }
 
-function mockReels(pageStart: number): Post[] {
-  return Array.from({ length: 11 }, (_, i) => {
-    const index = pageStart + i;
-    return {
-      pk: String(MOCK_REEL_PK_START + index),
-      code: `REEL${index}`,
-      caption: `Demo reel #${index}`,
-      taken_at: 1_776_000_000 + index * 86_400,
-      owner_username: "natgeo",
-      thumbnail_url: reelPreview(index),
-      resources: [{ url: "", kind: "video" as const }],
-    };
-  });
-}
 
 function mockMediaFixture(kind: DownloadMediaKind): string {
   return kind === "video"
@@ -199,18 +183,43 @@ const MOCK_STORIES = [
 ];
 const MOCK_STORY_KINDS = new Map(MOCK_STORIES.map((story) => [story.pk, story.kind]));
 
-function mockRelationshipUsers(kind: RelationshipKind): SearchUser[] {
-  const names = kind === "following"
-    ? ["meta", "metaglasses", ...Array.from({ length: 22 }, (_, index) => `following_${index + 3}`)]
-    : Array.from({ length: 24 }, (_, index) => `follower_${index + 1}`);
-  return names.map((username, index) => ({
-    pk: `${(kind === "followers" ? 8_000_000 : 8_100_000) + index}`,
-    username,
-    full_name: username.replace(/_/g, " ").replace(/^./, (letter: string) => letter.toUpperCase()),
-    is_verified: index === 0,
-    is_private: index % 7 === 0,
-    avatar_url: AVATAR,
+
+function mockFiles(card: LibraryCard): LibraryFile[] {
+  const count = Math.max(1, card.resource_count);
+  return Array.from({ length: count }, (_, ordinal) => ({
+    id: card.id * 100 + ordinal + 1,
+    ordinal,
+    kind: card.id === 2 ? "video" : "photo",
+    byte_size: card.availability === "missing" ? 0 : 1_500_000 + ordinal * 250_000,
+    mtime: 1_776_100_000 + ordinal,
+    exists_on_disk: card.availability === "available",
+    last_seen_at: 1_776_100_100,
   }));
+}
+
+function mockDetail(card: LibraryCard): LibraryItemDetail {
+  return {
+    id: card.id,
+    kind: card.kind,
+    remote_pk: `mock-${card.id}`,
+    shortcode: card.shortcode,
+    owner_pk: `owner-${card.id}`,
+    owner_username: card.owner_username,
+    taken_at: card.taken_at,
+    caption: card.caption,
+    like_count: card.id * 120,
+    comment_count: card.id * 7,
+    imported_at: card.imported_at,
+    updated_at: card.updated_at,
+    files: mockFiles(card),
+    source_ids: [],
+  };
+}
+
+function isLibraryFirstScanDemo(): boolean {
+  return (
+    new URLSearchParams(window.location.search).get("demo") === "library-first-scan"
+  );
 }
 
 const MOCK_REMOTE_MEDIA_FIXTURES = new Set([
@@ -298,44 +307,6 @@ const LIBRARY_CARDS: MockLibraryCard[] = [
     preview_url: libraryPreview("MISSING", "#374151", "#111827"),
   },
 ];
-
-function mockFiles(card: LibraryCard): LibraryFile[] {
-  const count = Math.max(1, card.resource_count);
-  return Array.from({ length: count }, (_, ordinal) => ({
-    id: card.id * 100 + ordinal + 1,
-    ordinal,
-    kind: card.id === 2 ? "video" : "photo",
-    byte_size: card.availability === "missing" ? 0 : 1_500_000 + ordinal * 250_000,
-    mtime: 1_776_100_000 + ordinal,
-    exists_on_disk: card.availability === "available",
-    last_seen_at: 1_776_100_100,
-  }));
-}
-
-function mockDetail(card: LibraryCard): LibraryItemDetail {
-  return {
-    id: card.id,
-    kind: card.kind,
-    remote_pk: `mock-${card.id}`,
-    shortcode: card.shortcode,
-    owner_pk: `owner-${card.id}`,
-    owner_username: card.owner_username,
-    taken_at: card.taken_at,
-    caption: card.caption,
-    like_count: card.id * 120,
-    comment_count: card.id * 7,
-    imported_at: card.imported_at,
-    updated_at: card.updated_at,
-    files: mockFiles(card),
-    source_ids: [],
-  };
-}
-
-function isLibraryFirstScanDemo(): boolean {
-  return (
-    new URLSearchParams(window.location.search).get("demo") === "library-first-scan"
-  );
-}
 
 function isRemoteMediaFailureDemo(): boolean {
   return (
@@ -580,7 +551,7 @@ function validateProfileArgs(args: CmdArgs | undefined): CmdArgs {
   const username = normalizeUsername(args?.username);
   if (!isPlainObject(args?.opts)) throw new Error("Profile options are malformed");
   const opts = args.opts;
-  const optionKeys = ["posts", "reels", "stories", "highlights", "avatar"] as const;
+  const optionKeys = ["posts", "reels", "avatar"] as const;
   if (optionKeys.some((key) => typeof opts[key] !== "boolean")) {
     throw new Error("Profile options are malformed");
   }
@@ -823,32 +794,17 @@ function profileManifest(
     );
   };
   if (opts.posts) {
-    const posts = [...mockProfilePosts(0), ...mockProfilePosts(12)];
+    const posts = mockProfilePosts(0).slice(0, 6);
     const maxPosts = typeof opts.max_posts === "number" ? opts.max_posts : posts.length;
     categories.push({ suffix: "post", kind: "photo", evidence: postEvidence(posts.slice(0, maxPosts)) });
   }
-  if (opts.reels) {
+  if (opts.reels && !opts.posts) {
     categories.push({
       suffix: "reel",
       kind: "video",
-      evidence: postEvidence([...mockReels(0), ...mockReels(11)]),
+      evidence: postEvidence(mockProfilePosts(0).slice(0, 6).filter((post) => post.resources.length === 1 && post.resources[0].kind === "video")),
     });
   }
-  if (opts.stories) {
-    categories.push({
-      suffix: "story",
-      kind: "photo",
-      evidence: MOCK_STORIES.map((story) => ({
-        root: configuredRoot,
-        relativePath: `${username}/stories/${mockOutputBasename(story.pk, story.kind, 0)}`,
-        namespace: "story",
-        pk: story.pk,
-        ordinal: 0,
-        kind: story.kind,
-      })),
-    });
-  }
-  if (opts.highlights) categories.push({ suffix: "highlight", kind: "video", evidence: [] });
   if (opts.avatar) categories.push({ suffix: "avatar", kind: "photo", evidence: [] });
   return {
     label: `@${username} archive`,
@@ -888,9 +844,6 @@ function reply(
   switch (cmd) {
     case "plugin:app|version":
       return packageVersion;
-    case "get_balance":
-    case "__balance":
-      return { requests: 14_700_000, rate: 10, amount: 123.45, currency: "usd" };
     case "ensure_configured_library_root":
       return mockLibraryRoot();
     case "list_library_roots":
@@ -927,7 +880,6 @@ function reply(
       return { kind: "profile", username };
     }
     case "fetch_profile": {
-      const pageStart = args?.endCursor ? 12 : 0;
       const requestedUsername = normalizeUsername(args?.username ?? "instagram");
       const remoteMediaFailureDemo =
         isRemoteMediaFailureDemo() && requestedUsername === "preview_demo";
@@ -940,66 +892,14 @@ function reply(
           full_name: remoteMediaFailureDemo ? "Preview Demo" : "Instagram",
           media_count: remoteMediaFailureDemo ? 24 : 7421,
           follower_count: remoteMediaFailureDemo ? 1200 : 713_000_000,
-          following_count: remoteMediaFailureDemo ? 40 : 234,
-          is_private: false,
           is_verified: !remoteMediaFailureDemo,
           avatar_url: remoteMediaFailureDemo
             ? "https://cdninstagram.com/mock-failure/avatar.jpg"
             : AVATAR,
         },
-        recent_posts: mockProfilePosts(pageStart, remoteMediaFailureDemo),
-        end_cursor: args?.endCursor ? null : "cursor",
+        recent_posts: mockProfilePosts(0, remoteMediaFailureDemo).slice(0, 6),
       };
     }
-    case "fetch_profile_summary":
-      return {
-        pk: "25025320",
-        username: String(args?.username ?? "instagram"),
-        full_name: "Instagram",
-        media_count: 7421,
-        follower_count: 713_000_000,
-        following_count: 234,
-        is_private: false,
-        is_verified: true,
-        avatar_url: AVATAR,
-      };
-    case "fetch_relationships": {
-      const kind = args?.kind === "following" ? "following" : "followers";
-      const pageStart = args?.maxId ? 12 : 0;
-      return {
-        users: mockRelationshipUsers(kind).slice(pageStart, pageStart + 12),
-        next_cursor: args?.maxId ? null : `${kind}-cursor`,
-      };
-    }
-    case "search_relationships": {
-      const kind = args?.kind === "following" ? "following" : "followers";
-      const query = String(args?.query ?? "").trim().toLowerCase();
-      return mockRelationshipUsers(kind).filter((user) =>
-        `${user.username} ${user.full_name ?? ""}`.toLowerCase().includes(query),
-      );
-    }
-    case "fetch_reels": {
-      const pageStart = args?.endCursor ? 11 : 0;
-      return {
-        posts: mockReels(pageStart),
-        end_cursor: args?.endCursor ? null : "reels-cursor",
-      };
-    }
-    case "search_users": {
-      const q = String(args?.query ?? "").toLowerCase();
-      const pool = [
-        { pk: "25025320", username: "instagram", full_name: "Instagram", is_verified: true, is_private: false, avatar_url: AVATAR },
-        { pk: "1234", username: "nike", full_name: "Nike", is_verified: true, is_private: false, avatar_url: AVATAR },
-        { pk: "5678", username: "nikelife", full_name: "Nike Life", is_verified: false, is_private: false, avatar_url: AVATAR },
-        { pk: "9012", username: "nikita.runs", full_name: "Nikita", is_verified: false, is_private: false, avatar_url: AVATAR },
-        { pk: "3456", username: "nikolciaak", full_name: "Nikol", is_verified: false, is_private: true, avatar_url: AVATAR },
-      ];
-      return pool.filter((u) => u.username.includes(q.replace(/^@/, "")));
-    }
-    case "fetch_stories":
-      return MOCK_STORIES.map((story) => ({ ...story }));
-    case "validate_token":
-      return reply("__balance", undefined, registeredMedia);
     // event plugin stubs
     case "plugin:event|listen":
       return 1;
@@ -1041,8 +941,6 @@ export function installTauriMock(): void {
   const registeredMedia = new Map<number, string>();
   const completedEvidence = new Map<string, Map<string, MockDownloadEvidence>>();
   const config: ConfigState = {
-    has_token: true,
-    token_hint: "***9f3a",
     has_proxy: false,
     proxy_hint: null,
     dest_dir: "~/Downloads/insta-dl",

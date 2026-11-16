@@ -9,20 +9,11 @@ const MOCK_REMOTE_MEDIA_URL_RESOLVER = Symbol.for(
 );
 
 export interface ConfigState {
-  has_token: boolean;
-  token_hint: string | null;
   has_proxy: boolean;
   proxy_hint: string | null;
   dest_dir: string;
   sidecar: boolean;
   catalog_warning?: string;
-}
-
-export interface Balance {
-  requests: number;
-  rate: number | null;
-  amount: number | null;
-  currency: string | null;
 }
 
 export type MediaItemKind = "post" | "reel" | "story" | "avatar";
@@ -155,14 +146,6 @@ export async function configState(): Promise<ConfigState> {
 
 export async function setProxy(proxyUrl: string | null): Promise<ConfigState> {
   return invoke("set_proxy", { proxyUrl });
-}
-
-export async function validateToken(token: string): Promise<Balance> {
-  return invoke("validate_token", { token });
-}
-
-export async function getBalance(): Promise<Balance> {
-  return invoke("get_balance");
 }
 
 export async function ensureConfiguredLibraryRoot(): Promise<LibraryRoot> {
@@ -311,8 +294,6 @@ export interface Profile {
   full_name?: string;
   media_count: number;
   follower_count?: number;
-  following_count?: number;
-  is_private: boolean;
   is_verified: boolean;
   avatar_url?: string;
 }
@@ -320,28 +301,6 @@ export interface Profile {
 export interface ProfilePreview {
   profile: Profile;
   recent_posts: Post[];
-  end_cursor: string | null;
-}
-
-export interface MediaPage {
-  posts: Post[];
-  end_cursor: string | null;
-}
-
-export interface SearchUser {
-  pk: string;
-  username: string;
-  full_name?: string;
-  is_verified: boolean;
-  is_private: boolean;
-  avatar_url?: string;
-}
-
-export type RelationshipKind = "followers" | "following";
-
-export interface UserPage {
-  users: SearchUser[];
-  next_cursor: string | null;
 }
 
 export interface StoryItem {
@@ -361,8 +320,6 @@ export interface DirectItem {
 export interface ProfileOptions {
   posts: boolean;
   reels: boolean;
-  stories: boolean;
-  highlights: boolean;
   avatar: boolean;
   max_posts?: number | null;
 }
@@ -371,40 +328,8 @@ export async function resolveInput(input: string): Promise<Target> {
   return invoke("resolve_input", { input });
 }
 
-export async function fetchProfile(username: string, endCursor?: string | null): Promise<ProfilePreview> {
-  return invoke("fetch_profile", { username, endCursor: endCursor ?? null });
-}
-
-export async function fetchProfileSummary(username: string): Promise<Profile> {
-  return invoke("fetch_profile_summary", { username });
-}
-
-export async function fetchRelationships(
-  userId: string,
-  kind: RelationshipKind,
-  maxId?: string | null,
-): Promise<UserPage> {
-  return invoke("fetch_relationships", { userId, kind, maxId: maxId ?? null });
-}
-
-export async function searchRelationships(
-  userId: string,
-  kind: RelationshipKind,
-  query: string,
-): Promise<SearchUser[]> {
-  return invoke("search_relationships", { userId, kind, query });
-}
-
-export async function fetchReels(userId: string, endCursor?: string | null): Promise<MediaPage> {
-  return invoke("fetch_reels", { userId, endCursor: endCursor ?? null });
-}
-
-export async function searchUsers(query: string): Promise<SearchUser[]> {
-  return invoke("search_users", { query });
-}
-
-export async function fetchStories(userId: string): Promise<StoryItem[]> {
-  return invoke("fetch_stories", { userId });
+export async function fetchProfile(username: string): Promise<ProfilePreview> {
+  return invoke("fetch_profile", { username });
 }
 
 export async function downloadDirect(
@@ -451,16 +376,4 @@ export function formatBytes(n: number): string {
     i++;
   }
   return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
-}
-
-export function formatBalance(b: Balance): string {
-  const req = new Intl.NumberFormat("en", { notation: b.requests >= 1_000_000 ? "compact" : "standard" }).format(b.requests);
-  const parts = [`${req} req`];
-  if (b.amount !== null && b.currency !== null) {
-    parts.push(`$${b.amount.toFixed(2)}`);
-  }
-  if (b.rate !== null) {
-    parts.push(`${b.rate} rps`);
-  }
-  return parts.join(" · ");
 }

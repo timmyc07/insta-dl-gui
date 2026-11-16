@@ -17,11 +17,11 @@ npm run tauri dev
 
 ```
 src/                  # Vue 3 + TypeScript UI
-  views/              # onboarding, download, explore, library, queue, settings screens
+  views/              # download, explore, library, queue, settings screens
   stores/             # pinia: app config, Explore session, job queue and library catalog state
   lib/ipc.ts          # typed wrappers over Tauri commands/events
 src-tauri/src/
-  hiker.rs            # HikerAPI REST client + typed error taxonomy + mappers
+  instagram.rs        # Public Instagram embed client and media parsers
   cdn.rs              # CDN streamer — every safety rule lives here, one place
   commands.rs         # download commands: fetch/enqueue/cancel + catalog updates
   catalog.rs          # SQLite catalog entry point, models, migrations and queries
@@ -35,7 +35,7 @@ src-tauri/src/
 
 Ground rules:
 
-- **Authenticated HikerAPI requests and file downloads stay in Rust.** During setup, the webview handles the token only while it is entered and sends it to Rust via Tauri IPC. Rust validates and stores it; the stored token is never returned to the webview. The frontend may render token-free CDN preview URLs returned in mapped DTOs.
+- Instagram page requests, CDN validation and file downloads run in Rust. The frontend receives mapped public media data.
 - **`cdn.rs` is the only backend path that downloads or persists media.** Don't bypass its MIME, redirect, size, retry, cancellation, and destination checks for downloads.
 - Backend shapes are mapped to DTOs in `hiker.rs` mappers; raw JSON never leaks to the frontend.
 
@@ -46,7 +46,6 @@ npm test              # frontend unit and mounted component tests
 
 cd src-tauri
 cargo test --locked   # offline unit tests — must pass, CI enforces clippy+fmt too
-SMOKE_TOKEN=... cargo test --locked --test live_download   # ~6 real API calls, run before releases
 ```
 
 UI can be developed without the backend: run `npx vite`, then open `http://localhost:1420/download?mock=1` or `http://localhost:1420/explore?mock=1&demo=explore`.

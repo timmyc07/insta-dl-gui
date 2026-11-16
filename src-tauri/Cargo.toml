@@ -1,7 +1,7 @@
 [package]
 name = "insta-dl-gui"
 version = "0.7.0"
-description = "Instagram downloader with HikerAPI backend"
+description = "Local desktop downloader for public Instagram embeds"
 authors = ["subzeroid"]
 edition = "2021"
 
@@ -36,6 +36,7 @@ base64 = "0.22"
 percent-encoding = "2"
 mime_guess = "2"
 cap-std = "4.0.3"
+dom_query = { version = "=0.27.0", default-features = false }
 
 [dev-dependencies]
 wiremock = "0.6"

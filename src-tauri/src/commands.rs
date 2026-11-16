@@ -14,11 +14,9 @@ use crate::catalog::{
 };
 use crate::cdn::{self, CdnError};
 use crate::config::Config;
-use crate::hiker::{map_post, map_profile, map_search_user};
 use crate::jobs::JobRegistry;
 use crate::models::{
     DirectItem, FetchedPostCategory, FetchedPostScope, Post, Profile, ProfileOptions,
-    RelationshipKind, SearchUser, StoryItem, UserPage,
 };
 use crate::targets::Target;
 use crate::AppState;
@@ -597,16 +595,6 @@ fn fetched_worker_panic_error() -> &'static str {
     "Fetched media download failed unexpectedly"
 }
 
-fn is_fatal_api_error(e: &crate::hiker::HikerError) -> bool {
-    matches!(
-        e.code(),
-        "AuthInvalid" | "QuotaExhausted" | "Banned" | "NotFound" | "RateLimited"
-    )
-}
-
-/// Stream one resource into `dest_base` with transient-error retries,
-/// forwarding progress and honouring cancellation.
-#[allow(clippy::too_many_arguments)]
 async fn download_one(
     cdn_http: &reqwest::Client,
     url: &str,
@@ -1163,28 +1151,6 @@ fn avatar_catalog_metadata(profile: &Profile) -> CatalogItemMetadata {
     }
 }
 
-fn story_catalog_metadata(
-    profile: &Profile,
-    pk: &str,
-    taken_at: Option<i64>,
-) -> Option<CatalogItemMetadata> {
-    if pk.is_empty() {
-        return None;
-    }
-    Some(CatalogItemMetadata {
-        remote_key: format!("story:{pk}"),
-        kind: MediaItemKind::Story,
-        remote_pk: Some(pk.to_owned()),
-        shortcode: None,
-        owner_pk: Some(profile.pk.clone()),
-        owner_username: Some(profile.username.clone()),
-        taken_at,
-        caption: None,
-        like_count: None,
-        comment_count: None,
-    })
-}
-
 fn root_label(path: &Path) -> &str {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -1292,205 +1258,33 @@ async fn catalog_newly_written_post_media_before_cancellation(
     }
 }
 
-/// Run an optional section fetch: quota/auth failures abort the whole
-/// enqueue, transient ones degrade to an empty list.
-async fn fetch_soft<F, Fut>(f: F) -> Result<Vec<serde_json::Value>, String>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<Vec<serde_json::Value>, crate::hiker::HikerError>>,
-{
-    match f().await {
-        Ok(items) => Ok(items),
-        Err(e) if is_fatal_api_error(&e) => Err(e.to_string()),
-        Err(_) => Ok(Vec::new()),
-    }
-}
-
 #[tauri::command]
 pub async fn resolve_input(input: String) -> Result<Target, String> {
     Target::parse(&input).ok_or_else(|| format!("Unrecognized input: {input}"))
-}
-
-async fn client(state: &State<'_, AppState>) -> Result<Arc<crate::hiker::HikerClient>, String> {
-    state.hiker_client().await
-}
-
-/// Account autocomplete — same order the API returns (Instagram's own
-/// ranking); no client-side reranking by design.
-#[tauri::command]
-pub async fn search_users(
-    query: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<SearchUser>, String> {
-    let q = query.trim();
-    if q.len() < 2 {
-        return Ok(Vec::new());
-    }
-    let client = client(&state).await?;
-    let users = client.search_accounts(q).await.map_err(|e| e.to_string())?;
-    Ok(users.iter().filter_map(map_search_user).collect())
-}
-
-#[tauri::command]
-pub async fn fetch_profile_summary(
-    username: String,
-    state: State<'_, AppState>,
-) -> Result<Profile, String> {
-    let client = client(&state).await?;
-    let user = client
-        .user_by_username(username.trim())
-        .await
-        .map_err(|error| error.to_string())?;
-    map_profile(&user).ok_or_else(|| "Could not parse profile payload".to_owned())
-}
-
-#[tauri::command]
-pub async fn fetch_relationships(
-    user_id: String,
-    kind: RelationshipKind,
-    max_id: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<UserPage, String> {
-    let client = client(&state).await?;
-    match kind {
-        RelationshipKind::Followers => {
-            client
-                .user_followers_chunk(user_id.trim(), max_id.as_deref())
-                .await
-        }
-        RelationshipKind::Following => {
-            client
-                .user_following_chunk(user_id.trim(), max_id.as_deref())
-                .await
-        }
-    }
-    .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn search_relationships(
-    user_id: String,
-    kind: RelationshipKind,
-    query: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<SearchUser>, String> {
-    let query = query.trim();
-    if query.len() < 2 {
-        return Ok(Vec::new());
-    }
-    let client = client(&state).await?;
-    match kind {
-        RelationshipKind::Followers => client.search_followers(user_id.trim(), query).await,
-        RelationshipKind::Following => client.search_following(user_id.trim(), query).await,
-    }
-    .map_err(|error| error.to_string())
 }
 
 #[derive(Serialize)]
 pub struct ProfilePreview {
     pub profile: Profile,
     pub recent_posts: Vec<Post>,
-    pub end_cursor: Option<String>,
 }
 
 #[tauri::command]
 pub async fn fetch_profile(
     username: String,
-    end_cursor: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ProfilePreview, String> {
-    let client = client(&state).await?;
-    let user = client
-        .user_by_username(&username)
+    let (profile, recent_posts) = state
+        .instagram_client()
         .await
-        .map_err(|e| e.to_string())?;
-    let profile = map_profile(&user).ok_or("Could not parse profile payload")?;
-    if profile.is_private || (profile.media_count == 0 && end_cursor.is_none()) {
-        return Ok(ProfilePreview {
-            profile,
-            recent_posts: Vec::new(),
-            end_cursor: None,
-        });
-    }
-    let page = client
-        .user_medias_chunk(&profile.pk, end_cursor.as_deref())
-        .await
-        .map_err(|e| e.to_string())?;
+        .profile(username.trim())
+        .await?;
     Ok(ProfilePreview {
         profile,
-        recent_posts: page.posts,
-        end_cursor: page.end_cursor,
+        recent_posts,
     })
 }
 
-/// One cursor-paged batch from the profile's dedicated Reels feed.
-#[tauri::command]
-pub async fn fetch_reels(
-    user_id: String,
-    end_cursor: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<crate::models::PostPage, String> {
-    client(&state)
-        .await?
-        .user_clips_chunk(&user_id, end_cursor.as_deref())
-        .await
-        .map_err(|error| error.to_string())
-}
-
-/// Active stories of a profile for the Explorer grid (billed 2 requests).
-async fn fetch_story_items(
-    client: &crate::hiker::HikerClient,
-    user_id: &str,
-) -> Result<Vec<StoryItem>, String> {
-    let items = client
-        .user_stories(user_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(items
-        .iter()
-        .filter_map(|item| {
-            let pk = match item.get("pk") {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Number(n)) => n.to_string(),
-                _ => return None,
-            };
-            let is_video = item
-                .get("video_versions")
-                .and_then(|v| v.as_array())
-                .map(|a| !a.is_empty())
-                .unwrap_or(false);
-            let media_url = if is_video {
-                crate::hiker::best_video(item)
-            } else {
-                crate::hiker::best_image(item)
-            }?;
-            let thumb_url = crate::hiker::best_image(item).or_else(|| Some(media_url.clone()));
-            Some(StoryItem {
-                pk,
-                taken_at: parse_ts(item),
-                kind: if is_video {
-                    "video".into()
-                } else {
-                    "photo".into()
-                },
-                media_url,
-                thumb_url,
-            })
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn fetch_stories(
-    user_id: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<StoryItem>, String> {
-    let client = client(&state).await?;
-    fetch_story_items(&client, &user_id).await
-}
-
-/// Download already-fetched resources (e.g. a single story) without
-/// re-fetching them from HikerAPI. Emits `job-progress`.
 #[tauri::command]
 pub async fn download_direct(
     label: String,
@@ -1657,7 +1451,7 @@ pub async fn enqueue_profile_download(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let (client, cdn_http) = state.download_clients().await?;
+    let (client, cdn_http) = state.download_clients().await;
     let cfg = state.cfg.read().await.clone();
     let catalog = state.catalog.clone();
     let jobs: Arc<JobRegistry> = state.jobs.clone();
@@ -1673,45 +1467,12 @@ pub async fn enqueue_profile_download(
     }
 
     let job_id = uuid::Uuid::new_v4().to_string();
-    let username = username.to_lowercase();
-
-    // Resolve profile first so stories/highlights can reuse its pk.
-    let user = match client.user_by_username(&username).await {
-        Ok(u) => u,
-        Err(e) => {
+    let (profile, posts) = client
+        .profile(&username.to_lowercase())
+        .await
+        .inspect_err(|_| {
             in_flight.lock().unwrap().remove(&key);
-            return Err(e.to_string());
-        }
-    };
-    let profile = match map_profile(&user) {
-        Some(p) => p,
-        None => {
-            in_flight.lock().unwrap().remove(&key);
-            return Err("Could not parse profile payload".into());
-        }
-    };
-
-    // Stories (2 req) / highlights (2 req + 1 per reel) fetched up front so
-    // a cancelled job never wastes their quota mid-run. Fatal API errors
-    // abort the enqueue; anything transient degrades to an empty section.
-    let stories_items = if opts.stories {
-        fetch_soft(|| client.user_stories(&profile.pk))
-            .await
-            .inspect_err(|_| {
-                in_flight.lock().unwrap().remove(&key);
-            })?
-    } else {
-        Vec::new()
-    };
-    let highlights_tray = if opts.highlights {
-        fetch_soft(|| client.user_highlights(&profile.pk))
-            .await
-            .inspect_err(|_| {
-                in_flight.lock().unwrap().remove(&key);
-            })?
-    } else {
-        Vec::new()
-    };
+        })?;
 
     let cancel_rx = jobs.register(&job_id);
     let em = JobEvents::new(&app, job_id.clone(), format!("@{}", profile.username));
@@ -1722,7 +1483,6 @@ pub async fn enqueue_profile_download(
     tauri::async_runtime::spawn(async move {
         let job_id = job_id_task;
         let result = run_profile_job(
-            &client,
             &cdn_http,
             &catalog,
             &destination_root,
@@ -1731,8 +1491,7 @@ pub async fn enqueue_profile_download(
             &dir,
             &profile,
             &opts,
-            stories_items,
-            highlights_tray,
+            &posts,
             false,
             Some(cancel_rx),
         )
@@ -1757,7 +1516,6 @@ pub async fn enqueue_profile_download(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_profile_job(
-    client: &Arc<crate::hiker::HikerClient>,
     cdn_http: &reqwest::Client,
     catalog: &Catalog,
     destination_root: &Path,
@@ -1766,8 +1524,7 @@ async fn run_profile_job(
     dir: &Path,
     profile: &Profile,
     opts: &ProfileOptions,
-    stories_items: Vec<serde_json::Value>,
-    highlights_tray: Vec<serde_json::Value>,
+    posts: &[Post],
     allow_loopback: bool,
     cancel: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<CompletedJob, JobFail> {
@@ -1781,23 +1538,6 @@ async fn run_profile_job(
     let mut bytes_total = 0u64;
     let mut outputs = Vec::new();
     let is_cancelled = || cancel.as_ref().map(|c| *c.borrow()).unwrap_or(false);
-
-    // Per-file failures are logged-and-skipped so one dead CDN link or a
-    // flaky network never kills the whole archive run. But if EVERYTHING
-    // failed, the job must not masquerade as a successful "Done: 0".
-    macro_rules! try_file {
-        ($fut:expr) => {
-            match $fut.await {
-                Ok(path) => path,
-                Err(JobFail::Cancelled) => return Err(JobFail::Cancelled),
-                Err(JobFail::Fatal(error)) => {
-                    last_error = Some(error.clone());
-                    all_resource_errors.push(error);
-                    continue;
-                }
-            }
-        };
-    }
 
     // ---- avatar ----
     if opts.avatar {
@@ -1863,209 +1603,54 @@ async fn run_profile_job(
                 None,
             );
         }
-        let mut cursor: Option<String> = None;
-        let mut considered: u64 = 0;
-        let mut seen_post_pks = HashSet::new();
-        let mut seen_cursors = HashSet::new();
-        loop {
+        let mut seen = HashSet::new();
+        let posts = posts.iter().filter(|post| {
+            !post.resources.is_empty()
+                && (!reels_only || matches!(post.resources.as_slice(), [resource] if resource.kind == crate::models::MediaKind::Video))
+                && seen.insert(&post.pk)
+        });
+        for post in posts.take(
+            opts.max_posts
+                .unwrap_or(u64::MAX)
+                .try_into()
+                .unwrap_or(usize::MAX),
+        ) {
             if is_cancelled() {
                 return Err(JobFail::Cancelled);
             }
-            let page_result = if reels_only {
-                client
-                    .user_clips_chunk(&profile.pk, cursor.as_deref())
-                    .await
-            } else {
-                client
-                    .user_medias_chunk(&profile.pk, cursor.as_deref())
-                    .await
-            };
-            let page = match page_result {
-                Ok(page) => page,
-                Err(error) => {
-                    return finish_completed_job(
-                        job_outcome(files_done, catalog_warnings),
-                        Some(error.to_string()),
-                        all_resource_errors,
-                        has_successful_resource,
-                        outputs,
-                        None,
-                    )
-                }
-            };
-            for post in &page.posts {
-                if seen_post_pks.contains(&post.pk) {
+            let base = taken_at_name(post.taken_at, &post.code);
+            let item_metadata = post_catalog_metadata(post);
+            let total = post.resources.len();
+            let mut downloaded = Vec::new();
+            let mut media_files_written = 0usize;
+            let mut resource_errors = Vec::new();
+            for (idx, resource) in post.resources.iter().enumerate() {
+                let dest_base = if total > 1 {
+                    posts_dir.join(format!("{base}_{}", idx + 1))
+                } else {
+                    posts_dir.join(&base)
+                };
+                let ordinal = u32::try_from(idx).unwrap_or(u32::MAX);
+                if let Some(file) = recover_downloaded_file(
+                    catalog,
+                    destination_root,
+                    &item_metadata.remote_key,
+                    ordinal,
+                )
+                .await
+                {
+                    has_successful_resource = true;
+                    downloaded.push(file);
                     continue;
                 }
-                if let Some(max) = opts.max_posts {
-                    if considered >= max {
-                        break;
-                    }
-                }
-                seen_post_pks.insert(post.pk.clone());
-                considered += 1;
-                let base = taken_at_name(post.taken_at, &post.code);
-                let item_metadata = post_catalog_metadata(post);
-                let total = post.resources.len();
-                let mut downloaded = Vec::new();
-                let mut media_files_written = 0usize;
-                let mut resource_errors = Vec::new();
-                for (idx, resource) in post.resources.iter().enumerate() {
-                    let dest_base = if total > 1 {
-                        posts_dir.join(format!("{base}_{}", idx + 1))
-                    } else {
-                        posts_dir.join(&base)
-                    };
-                    let ordinal = u32::try_from(idx).unwrap_or(u32::MAX);
-                    if let Some(file) = recover_downloaded_file(
-                        catalog,
-                        destination_root,
-                        &item_metadata.remote_key,
-                        ordinal,
-                    )
-                    .await
-                    {
-                        has_successful_resource = true;
-                        downloaded.push(file);
-                        continue;
-                    }
-                    match download_one(
-                        cdn_http,
-                        &resource.url,
-                        &dest_base,
-                        post.taken_at,
-                        em,
-                        files_done + idx + 1,
-                        ordinal,
-                        &mut bytes_total,
-                        cancel.as_ref().cloned(),
-                        allow_loopback,
-                    )
-                    .await
-                    {
-                        Ok(file) => {
-                            media_files_written += 1;
-                            has_successful_resource = true;
-                            downloaded.push(file);
-                        }
-                        Err(JobFail::Cancelled) => {
-                            catalog_newly_written_post_media_before_cancellation(
-                                catalog,
-                                destination_root,
-                                &item_metadata,
-                                &downloaded,
-                            )
-                            .await;
-                            return Err(JobFail::Cancelled);
-                        }
-                        Err(JobFail::Fatal(error)) => {
-                            last_error = Some(error.clone());
-                            all_resource_errors.push(error.clone());
-                            resource_errors.push(error);
-                        }
-                    }
-                }
-                let sidecar_ordinal = u32::try_from(total).unwrap_or(u32::MAX);
-                let mut sidecar_written = false;
-                if cfg.sidecar && !downloaded.is_empty() {
-                    if let Some(sidecar) =
-                        recover_sidecar(&downloaded, sidecar_ordinal, &item_metadata)
-                    {
-                        downloaded.push(sidecar);
-                    } else if let Some(first_file) = downloaded.first() {
-                        match write_sidecar(cfg, &posts_dir, post, &first_file.path, &item_metadata)
-                        {
-                            Ok(Some(path)) => match downloaded_sidecar(path, sidecar_ordinal) {
-                                Ok(sidecar) => downloaded.push(sidecar),
-                                Err(error) => {
-                                    last_error = Some(error.clone());
-                                    all_resource_errors.push(error.clone());
-                                    resource_errors.push(error);
-                                }
-                            },
-                            Ok(None) => {}
-                            Err(error) => {
-                                last_error = Some(error.clone());
-                                all_resource_errors.push(error.clone());
-                                resource_errors.push(error);
-                            }
-                        }
-                        sidecar_written = true;
-                    }
-                }
-                files_done += media_files_written;
-                if !downloaded.is_empty()
-                    && (media_files_written > 0 || sidecar_written || !resource_errors.is_empty())
-                {
-                    let media = DownloadedMedia {
-                        item: item_metadata,
-                        files: downloaded,
-                        resource_errors,
-                    };
-                    if media_files_written > 0 || sidecar_written {
-                        match catalog_downloaded_media(catalog, destination_root, &media).await {
-                            Ok(cataloged) => outputs.extend(cataloged),
-                            Err(_) => {
-                                catalog_warnings += 1;
-                                outputs.extend(uncataloged_job_outputs(&media));
-                            }
-                        }
-                    }
-                }
-            }
-            let Some(next_cursor) = page.end_cursor.filter(|value| !value.trim().is_empty()) else {
-                break;
-            };
-            if !seen_cursors.insert(next_cursor.clone()) {
-                break;
-            }
-            cursor = Some(next_cursor);
-            if let Some(max) = opts.max_posts {
-                if considered >= max {
-                    break;
-                }
-            }
-        }
-    }
-
-    // ---- stories ----
-    if opts.stories && !stories_items.is_empty() {
-        let stories_dir = dir.join("stories");
-        if let Err(error) = std::fs::create_dir_all(&stories_dir) {
-            return finish_completed_job(
-                job_outcome(files_done, catalog_warnings),
-                Some(error.to_string()),
-                all_resource_errors,
-                has_successful_resource,
-                outputs,
-                None,
-            );
-        }
-        for item in &stories_items {
-            if is_cancelled() {
-                return Err(JobFail::Cancelled);
-            }
-            let pk = value_pk(item);
-            let taken_at = parse_ts(item);
-            let base = taken_at_name(taken_at, &pk);
-            if stem_exists(&skip, &base) {
-                has_successful_resource = true;
-                continue;
-            }
-            let mut downloaded = Vec::new();
-            let mut resource_errors = Vec::new();
-            for (ordinal, resource) in crate::hiker::collect_resources(item, infer_video(item))
-                .iter()
-                .enumerate()
-            {
                 match download_one(
                     cdn_http,
                     &resource.url,
-                    &stories_dir.join(&base),
-                    taken_at,
+                    &dest_base,
+                    post.taken_at,
                     em,
-                    files_done + 1,
-                    u32::try_from(ordinal).unwrap_or(u32::MAX),
+                    files_done + idx + 1,
+                    ordinal,
                     &mut bytes_total,
                     cancel.as_ref().cloned(),
                     allow_loopback,
@@ -2073,11 +1658,20 @@ async fn run_profile_job(
                 .await
                 {
                     Ok(file) => {
-                        files_done += 1;
+                        media_files_written += 1;
                         has_successful_resource = true;
                         downloaded.push(file);
                     }
-                    Err(JobFail::Cancelled) => return Err(JobFail::Cancelled),
+                    Err(JobFail::Cancelled) => {
+                        catalog_newly_written_post_media_before_cancellation(
+                            catalog,
+                            destination_root,
+                            &item_metadata,
+                            &downloaded,
+                        )
+                        .await;
+                        return Err(JobFail::Cancelled);
+                    }
                     Err(JobFail::Fatal(error)) => {
                         last_error = Some(error.clone());
                         all_resource_errors.push(error.clone());
@@ -2085,13 +1679,42 @@ async fn run_profile_job(
                     }
                 }
             }
-            if !downloaded.is_empty() {
-                if let Some(metadata) = story_catalog_metadata(profile, &pk, taken_at) {
-                    let media = DownloadedMedia {
-                        item: metadata,
-                        files: downloaded,
-                        resource_errors,
-                    };
+            let sidecar_ordinal = u32::try_from(total).unwrap_or(u32::MAX);
+            let mut sidecar_written = false;
+            if cfg.sidecar && !downloaded.is_empty() {
+                if let Some(sidecar) = recover_sidecar(&downloaded, sidecar_ordinal, &item_metadata)
+                {
+                    downloaded.push(sidecar);
+                } else if let Some(first_file) = downloaded.first() {
+                    match write_sidecar(cfg, &posts_dir, post, &first_file.path, &item_metadata) {
+                        Ok(Some(path)) => match downloaded_sidecar(path, sidecar_ordinal) {
+                            Ok(sidecar) => downloaded.push(sidecar),
+                            Err(error) => {
+                                last_error = Some(error.clone());
+                                all_resource_errors.push(error.clone());
+                                resource_errors.push(error);
+                            }
+                        },
+                        Ok(None) => {}
+                        Err(error) => {
+                            last_error = Some(error.clone());
+                            all_resource_errors.push(error.clone());
+                            resource_errors.push(error);
+                        }
+                    }
+                    sidecar_written = true;
+                }
+            }
+            files_done += media_files_written;
+            if !downloaded.is_empty()
+                && (media_files_written > 0 || sidecar_written || !resource_errors.is_empty())
+            {
+                let media = DownloadedMedia {
+                    item: item_metadata,
+                    files: downloaded,
+                    resource_errors,
+                };
+                if media_files_written > 0 || sidecar_written {
                     match catalog_downloaded_media(catalog, destination_root, &media).await {
                         Ok(cataloged) => outputs.extend(cataloged),
                         Err(_) => {
@@ -2099,99 +1722,6 @@ async fn run_profile_job(
                             outputs.extend(uncataloged_job_outputs(&media));
                         }
                     }
-                } else {
-                    outputs.extend(
-                        downloaded
-                            .iter()
-                            .filter_map(|file| job_output_file(file, None)),
-                    );
-                }
-            }
-        }
-    }
-
-    // ---- highlights ----
-    if opts.highlights && !highlights_tray.is_empty() {
-        let hl_root = dir.join("highlights");
-        if let Err(error) = std::fs::create_dir_all(&hl_root) {
-            return finish_completed_job(
-                job_outcome(files_done, catalog_warnings),
-                Some(error.to_string()),
-                all_resource_errors,
-                has_successful_resource,
-                outputs,
-                None,
-            );
-        }
-        for tray in &highlights_tray {
-            if is_cancelled() {
-                return Err(JobFail::Cancelled);
-            }
-            let Some(hl_pk) = tray.get("pk").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let title = tray
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(safe_segment)
-                .filter(|t| !t.trim_matches('_').is_empty())
-                .unwrap_or_else(|| hl_pk.to_string());
-            let hl_dir = hl_root.join(format!("{}_{}", safe_segment(hl_pk), title));
-            if let Err(error) = std::fs::create_dir_all(&hl_dir) {
-                return finish_completed_job(
-                    job_outcome(files_done, catalog_warnings),
-                    Some(error.to_string()),
-                    all_resource_errors,
-                    has_successful_resource,
-                    outputs,
-                    None,
-                );
-            }
-            let items = match client.highlight_items(hl_pk).await {
-                Ok(items) => items,
-                Err(error) => {
-                    return finish_completed_job(
-                        job_outcome(files_done, catalog_warnings),
-                        Some(error.to_string()),
-                        all_resource_errors,
-                        has_successful_resource,
-                        outputs,
-                        None,
-                    )
-                }
-            };
-            for item in &items {
-                if is_cancelled() {
-                    return Err(JobFail::Cancelled);
-                }
-                let pk = value_pk(item);
-                let taken_at = parse_ts(item);
-                let base = taken_at_name(taken_at, &pk);
-                if stem_exists(&skip, &base) {
-                    has_successful_resource = true;
-                    continue;
-                }
-                for (ordinal, resource) in crate::hiker::collect_resources(item, infer_video(item))
-                    .iter()
-                    .enumerate()
-                {
-                    let file = try_file!(download_one(
-                        cdn_http,
-                        &resource.url,
-                        &hl_dir.join(&base),
-                        taken_at,
-                        em,
-                        files_done + 1,
-                        u32::try_from(ordinal).unwrap_or(u32::MAX),
-                        &mut bytes_total,
-                        cancel.as_ref().cloned(),
-                        allow_loopback,
-                    ));
-                    if let Some(output) = job_output_file(&file, None) {
-                        outputs.push(output);
-                    }
-                    files_done += 1;
-                    has_successful_resource = true;
                 }
             }
         }
@@ -2207,29 +1737,6 @@ async fn run_profile_job(
     )
 }
 
-fn value_pk(item: &serde_json::Value) -> String {
-    match item.get("pk") {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(serde_json::Value::Number(n)) => n.to_string(),
-        _ => String::new(),
-    }
-}
-
-fn parse_ts(item: &serde_json::Value) -> Option<i64> {
-    crate::models::parse_taken_at(item.get("taken_at").unwrap_or(&serde_json::Value::Null))
-}
-
-fn infer_video(item: &serde_json::Value) -> bool {
-    match item.get("media_type").and_then(|v| v.as_u64()) {
-        Some(t) => t == 2,
-        None => item
-            .get("video_versions")
-            .and_then(|v| v.as_array())
-            .map(|a| !a.is_empty())
-            .unwrap_or(false),
-    }
-}
-
 /// Single post/reel by shortcode. Emits `job-progress` events.
 #[tauri::command]
 pub async fn download_post(
@@ -2237,7 +1744,7 @@ pub async fn download_post(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let (client, cdn_http) = state.download_clients().await?;
+    let (client, cdn_http) = state.download_clients().await;
     let cfg = state.cfg.read().await.clone();
     let catalog = state.catalog.clone();
     let jobs: Arc<JobRegistry> = state.jobs.clone();
@@ -2253,20 +1760,9 @@ pub async fn download_post(
         }
     }
 
-    let media = match client.media_by_code(&code).await {
-        Ok(m) => m,
-        Err(e) => {
-            in_flight.lock().unwrap().remove(&key);
-            return Err(e.to_string());
-        }
-    };
-    let post = match map_post(&media) {
-        Some(p) => p,
-        None => {
-            state.in_flight.lock().unwrap().remove(&key);
-            return Err("Could not parse media payload".into());
-        }
-    };
+    let post = client.post(&code).await.inspect_err(|_| {
+        in_flight.lock().unwrap().remove(&key);
+    })?;
     let job_id = uuid::Uuid::new_v4().to_string();
 
     let cancel_rx = jobs.register(&job_id);
@@ -2783,42 +2279,6 @@ mod download_catalog_tests;
 mod tests {
     use super::*;
     use crate::models::{FetchedPostCategory, FetchedPostScope, MediaKind, MediaResource};
-    use wiremock::matchers::{method, path, query_param};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    #[tokio::test]
-    async fn fetch_story_items_uses_profile_id_without_username_lookup() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/v2/user/stories"))
-            .and(query_param("user_id", "42"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "reel": {
-                    "items": [{
-                        "pk": "100",
-                        "taken_at": 1_700_000_000,
-                        "image_versions2": {
-                            "candidates": [{
-                                "url": "https://cdninstagram.com/story.jpg",
-                                "width": 1080
-                            }]
-                        }
-                    }]
-                }
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let client = crate::hiker::HikerClient::with_base_url("token".into(), server.uri());
-
-        let items = fetch_story_items(&client, "42").await.unwrap();
-
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].pk, "100");
-        let requests = server.received_requests().await.unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].url.path(), "/v2/user/stories");
-    }
 
     fn direct_item(pk: &str) -> DirectItem {
         DirectItem {
