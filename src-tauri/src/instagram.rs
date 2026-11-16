@@ -25,6 +25,7 @@ impl InstagramClient {
     fn with_origin(origin: &str, proxy: Option<&str>) -> Result<Self, String> {
         let builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("insta-dl-gui-local/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(20));
         let http = crate::proxy::apply_proxy(builder, proxy)?
             .build()
@@ -253,6 +254,10 @@ mod tests {
             vec![MediaKind::Photo, MediaKind::Video]
         );
         let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests[0].headers["user-agent"],
+            concat!("insta-dl-gui-local/", env!("CARGO_PKG_VERSION"))
+        );
         assert!(!requests[0].headers.contains_key("authorization"));
         assert!(!requests[0].headers.contains_key("cookie"));
     }
