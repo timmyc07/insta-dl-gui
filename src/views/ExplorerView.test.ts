@@ -15,6 +15,7 @@ const ipc = vi.hoisted(() => ({
   downloadPost: vi.fn(),
   checkDownloadStatuses: vi.fn(),
   enqueueFetchedPostDownload: vi.fn(),
+  enqueuePublicArchive: vi.fn(),
   fetchProfilePostsPage: vi.fn(),
   fetchProfile: vi.fn(),
   fetchReels: vi.fn(),
@@ -193,6 +194,30 @@ afterEach(() => {
 });
 
 describe("ExplorerView async wiring", () => {
+  it("enqueues a single archive for the public account and uses the existing download conflicts", async () => {
+    const pending = deferred<string>();
+    ipc.enqueuePublicArchive.mockReturnValueOnce(pending.promise);
+    const wrapper = render();
+    await loadProfile(wrapper, {
+      ...preview,
+      recent_posts: [photoPost("p1", "https://cdninstagram.com/example")],
+    });
+    const archive = button(wrapper, "Download all public posts");
+    await archive.trigger("click");
+    await archive.trigger("click");
+    expect(ipc.enqueuePublicArchive).toHaveBeenCalledExactlyOnceWith("nike");
+    expect(button(wrapper, "All").attributes("disabled")).toBeDefined();
+
+    pending.resolve("public-archive");
+    await flushPromises();
+    expect(useJobsStore().jobs.get("public-archive")?.conflictKeys).toEqual([
+      "profile:nike", "folder:nike:posts",
+    ]);
+    expect(archive.attributes("disabled")).toBeDefined();
+    finishJob("public-archive", "cancelled");
+    await flushPromises();
+    expect(archive.attributes("disabled")).toBeUndefined();
+  });
   it("loads older public pages once, preserves selections, and includes them in All", async () => {
     const first = photoPost("first", "https://cdninstagram.com/first");
     const older = photoPost("older", "https://cdninstagram.com/older");

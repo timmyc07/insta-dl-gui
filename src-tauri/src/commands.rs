@@ -2116,6 +2116,11 @@ impl ProgressSink for BatchProgress<'_> {
     }
 }
 
+enum PostDownloadScope {
+    Snapshot(Vec<Post>),
+    PublicArchive,
+}
+
 /// Download one exact, already-fetched Posts/Reels snapshot without an API refetch.
 #[tauri::command]
 pub(crate) async fn enqueue_fetched_post_download(
@@ -2129,17 +2134,59 @@ pub(crate) async fn enqueue_fetched_post_download(
     let username = normalize_fetched_username(&username)?;
     let posts = validate_fetched_posts(posts, false)?;
     let key = fetched_post_job_key(&username, category, scope, &posts);
+    let label = fetched_post_label(&username, category, scope, posts.len());
+    start_post_download(
+        username,
+        key,
+        label,
+        PostDownloadScope::Snapshot(posts),
+        app,
+        state,
+    )
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn enqueue_public_archive(
+    username: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let username = normalize_fetched_username(&username)?;
+    let key = format!("profile:{username}");
+    let label = format!("@{username} · all public posts");
+    start_post_download(
+        username,
+        key,
+        label,
+        PostDownloadScope::PublicArchive,
+        app,
+        state,
+    )
+    .await
+}
+
+async fn start_post_download(
+    username: String,
+    key: String,
+    label: String,
+    scope: PostDownloadScope,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let profile_key = format!("profile:{username}");
     let in_flight = Arc::clone(&state.in_flight);
     {
         let mut registry = in_flight
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !registry.insert(key.clone()) {
-            return Err(format!(
-                "A download for @{username} {} · {} is already running",
-                category.as_str(),
-                scope.as_str()
-            ));
+        let snapshot_prefix = format!("fetched:{username}:");
+        if registry.contains(&profile_key)
+            || (matches!(scope, PostDownloadScope::PublicArchive)
+                && registry.iter().any(|key| key.starts_with(&snapshot_prefix)))
+            || !registry.insert(key.clone())
+        {
+            return Err(format!("A download for @{username} is already running"));
         }
     }
     let in_flight_guard = InFlightGuard {
@@ -2148,7 +2195,7 @@ pub(crate) async fn enqueue_fetched_post_download(
     };
 
     let cfg = state.cfg.read().await.clone();
-    let cdn_http = state.cdn_client().await;
+    let (instagram, cdn_http) = state.download_clients().await;
     let catalog = state.catalog.clone();
     let jobs = Arc::clone(&state.jobs);
     let job_id = uuid::Uuid::new_v4().to_string();
@@ -2157,11 +2204,7 @@ pub(crate) async fn enqueue_fetched_post_download(
         registry: jobs,
         job_id: job_id.clone(),
     };
-    let em = JobEvents::new(
-        &app,
-        job_id.clone(),
-        fetched_post_label(&username, category, scope, posts.len()),
-    );
+    let em = JobEvents::new(&app, job_id.clone(), label);
 
     tauri::async_runtime::spawn(async move {
         let _in_flight_guard = in_flight_guard;
@@ -2169,18 +2212,37 @@ pub(crate) async fn enqueue_fetched_post_download(
         let worker_result = std::panic::AssertUnwindSafe(async {
             let destination_root = PathBuf::from(&cfg.dest_dir);
             let dir = fetched_posts_dir(&destination_root, &username);
-            let result = run_fetched_posts_job(
-                &cdn_http,
-                &catalog,
-                &destination_root,
-                &cfg,
-                &em,
-                &dir,
-                &posts,
-                Some(cancel_rx),
-                false,
-            )
-            .await;
+            let result = match scope {
+                PostDownloadScope::Snapshot(posts) => {
+                    run_fetched_posts_job(
+                        &cdn_http,
+                        &catalog,
+                        &destination_root,
+                        &cfg,
+                        &em,
+                        &dir,
+                        &posts,
+                        Some(cancel_rx),
+                        false,
+                    )
+                    .await
+                }
+                PostDownloadScope::PublicArchive => {
+                    public_archive::run(
+                        &instagram,
+                        &username,
+                        &cdn_http,
+                        &catalog,
+                        &destination_root,
+                        &cfg,
+                        &em,
+                        &dir,
+                        cancel_rx,
+                        false,
+                    )
+                    .await
+                }
+            };
             (result, dir)
         })
         .catch_unwind()
@@ -2217,70 +2279,121 @@ async fn run_fetched_posts_job(
     allow_loopback: bool,
 ) -> Result<CompletedJob, JobFail> {
     std::fs::create_dir_all(dir)?;
+    let mut batch = PostBatch::default();
     let total_files = posts.iter().map(|post| post.resources.len()).sum();
-    let mut file_offset = 0usize;
-    let mut bytes_offset = 0u64;
-    let reported_bytes = std::sync::Mutex::new(0u64);
-    let mut outcome = JobOutcome::default();
-    let mut resource_errors = Vec::new();
-    let mut last_error = None;
-    let mut has_successful_resource = false;
-    let mut outputs = Vec::new();
-
-    for post in posts {
-        if cancel.as_ref().map(|rx| *rx.borrow()).unwrap_or(false) {
-            return Err(JobFail::Cancelled);
-        }
-        let progress = BatchProgress {
-            inner: em,
-            file_offset,
-            total_files,
-            bytes_offset,
-            reported_bytes: &reported_bytes,
-        };
-        match run_single_post_attempt(
+    batch
+        .download(
             cdn_http,
             catalog,
             destination_root,
             cfg,
-            &progress,
+            em,
             dir,
-            post,
-            cancel.as_ref().cloned(),
+            posts,
+            cancel,
+            total_files,
+            true,
             allow_loopback,
         )
-        .await
-        {
-            Ok(attempt) => {
-                let completed = attempt.completed;
-                outcome.files_written += completed.outcome.files_written;
-                outcome.catalog_warnings += completed.outcome.catalog_warnings;
-                bytes_offset = bytes_offset.saturating_add(completed.bytes_downloaded);
-                has_successful_resource |= completed.has_successful_resource;
-                outputs.extend(completed.outputs);
-                resource_errors.extend(attempt.resource_errors);
-                if let Some(error) = attempt.last_error {
-                    last_error = Some(error);
+        .await?;
+    batch.finish(posts.len())
+}
+
+#[derive(Default)]
+struct PostBatch {
+    file_offset: usize,
+    bytes_offset: u64,
+    reported_bytes: std::sync::Mutex<u64>,
+    outcome: JobOutcome,
+    resource_errors: Vec<String>,
+    last_error: Option<String>,
+    has_successful_resource: bool,
+    outputs: Vec<JobOutputFile>,
+}
+
+impl PostBatch {
+    #[allow(clippy::too_many_arguments)]
+    async fn download(
+        &mut self,
+        cdn_http: &reqwest::Client,
+        catalog: &Catalog,
+        destination_root: &Path,
+        cfg: &Config,
+        em: &dyn ProgressSink,
+        dir: &Path,
+        posts: &[Post],
+        cancel: Option<tokio::sync::watch::Receiver<bool>>,
+        total_files: usize,
+        collect_outputs: bool,
+        allow_loopback: bool,
+    ) -> Result<(), JobFail> {
+        for post in posts {
+            if cancel.as_ref().map(|rx| *rx.borrow()).unwrap_or(false) {
+                return Err(JobFail::Cancelled);
+            }
+            let progress = BatchProgress {
+                inner: em,
+                file_offset: self.file_offset,
+                total_files,
+                bytes_offset: self.bytes_offset,
+                reported_bytes: &self.reported_bytes,
+            };
+            match run_single_post_attempt(
+                cdn_http,
+                catalog,
+                destination_root,
+                cfg,
+                &progress,
+                dir,
+                post,
+                cancel.as_ref().cloned(),
+                allow_loopback,
+            )
+            .await
+            {
+                Ok(attempt) => {
+                    let completed = attempt.completed;
+                    self.outcome.files_written += completed.outcome.files_written;
+                    self.outcome.catalog_warnings += completed.outcome.catalog_warnings;
+                    self.bytes_offset =
+                        self.bytes_offset.saturating_add(completed.bytes_downloaded);
+                    self.has_successful_resource |= completed.has_successful_resource;
+                    if collect_outputs {
+                        self.outputs.extend(completed.outputs);
+                    }
+                    self.resource_errors.extend(attempt.resource_errors);
+                    if let Some(error) = attempt.last_error {
+                        self.last_error = Some(error);
+                    }
+                }
+                Err(JobFail::Cancelled) => return Err(JobFail::Cancelled),
+                Err(JobFail::Fatal(error)) => {
+                    self.record_error(error);
                 }
             }
-            Err(JobFail::Cancelled) => return Err(JobFail::Cancelled),
-            Err(JobFail::Fatal(error)) => {
-                last_error = Some(error.clone());
-                resource_errors.push(error);
-            }
+            self.file_offset = self.file_offset.saturating_add(post.resources.len());
         }
-        file_offset = file_offset.saturating_add(post.resources.len());
+        Ok(())
     }
 
-    finish_completed_job(
-        outcome,
-        last_error,
-        resource_errors,
-        has_successful_resource,
-        outputs,
-        Some(posts.len()),
-    )
+    fn record_error(&mut self, error: String) {
+        self.last_error = Some(error.clone());
+        self.resource_errors.push(error);
+    }
+
+    fn finish(self, requested_items: usize) -> Result<CompletedJob, JobFail> {
+        finish_completed_job(
+            self.outcome,
+            self.last_error,
+            self.resource_errors,
+            self.has_successful_resource,
+            self.outputs,
+            Some(requested_items),
+        )
+    }
 }
+
+mod public_archive;
 
 #[tauri::command]
 pub async fn cancel_job(job_id: String, state: State<'_, AppState>) -> Result<bool, String> {

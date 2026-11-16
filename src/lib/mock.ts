@@ -572,6 +572,8 @@ function validateDownloadArgs(cmd: string, args: CmdArgs | undefined): CmdArgs {
   switch (cmd) {
     case "enqueue_fetched_post_download":
       return validateFetchedArgs(args);
+    case "enqueue_public_archive":
+      return { username: normalizeUsername(args?.username) };
     case "download_direct":
       return validateDirectArgs(args);
     case "download_post":
@@ -825,6 +827,15 @@ function downloadManifest(
   switch (cmd) {
     case "enqueue_fetched_post_download":
       return fetchedPostManifest(args, allocateFileId, configuredRoot);
+    case "enqueue_public_archive": {
+      const manifest = fetchedPostManifest({
+        username: args?.username,
+        category: "posts",
+        scope: "all",
+        posts: [...mockProfilePosts(0), ...mockProfilePosts(12)].filter((post) => post.resources.length > 0),
+      }, allocateFileId, configuredRoot);
+      return { ...manifest, label: `@${args?.username} · all public posts` };
+    }
     case "download_direct":
       return directManifest(args, allocateFileId, configuredRoot);
     case "download_post":
@@ -1168,6 +1179,7 @@ export function installTauriMock(): void {
         cmd === "download_direct" ||
         cmd === "download_post" ||
         cmd === "enqueue_fetched_post_download" ||
+        cmd === "enqueue_public_archive" ||
         cmd === "enqueue_profile_download"
       ) {
         const response = Promise.resolve().then(() => enqueueDownload(cmd, args));

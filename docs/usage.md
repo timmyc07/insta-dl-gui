@@ -10,6 +10,10 @@ Enter `@username` or the public profile link in **Explore**. The first view load
 
 The timeline shows the pages Instagram makes available to logged-out visitors. A post marked **Unavailable** does not provide a downloadable public embed. Private content, Stories, Highlights and follower lists require other access.
 
+## Download the public timeline
+
+In **Explore**, enter a public profile and press **Download all public posts**. The job follows the public timeline in page order and saves media under `Downloads/insta-dl/<username>/posts/` or your configured download folder. Existing files recorded in the Library are reused. Open **Queue** to see progress or cancel. Files already written remain in the Library if you cancel or Instagram stops serving pages.
+
 ## Library
 
 Downloads appear in your local Library. Choose **Scan library** to import existing media from the configured download folder.

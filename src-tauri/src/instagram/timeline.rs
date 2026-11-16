@@ -30,6 +30,12 @@ struct PublicProfilePage {
     lsd: Option<String>,
 }
 
+pub(crate) struct PublicTimeline<'a> {
+    client: &'a InstagramClient,
+    url: String,
+    profile: PublicProfilePage,
+}
+
 impl InstagramClient {
     pub async fn timeline(
         &self,
@@ -37,9 +43,6 @@ impl InstagramClient {
         cursor: Option<&str>,
         shown_codes: &[String],
     ) -> Result<TimelinePage, String> {
-        if !is_username(username) {
-            return Err("Enter a valid Instagram username".to_owned());
-        }
         if cursor.is_some_and(|value| !valid_cursor(value))
             || shown_codes.len() > 500
             || shown_codes.iter().any(|code| !is_shortcode(code))
@@ -47,6 +50,18 @@ impl InstagramClient {
             return Err("Invalid public timeline request".to_owned());
         }
 
+        let timeline = self.public_timeline(username).await?;
+        let seen = shown_codes.iter().cloned().collect();
+        timeline.page(cursor, &seen).await
+    }
+
+    pub(crate) async fn public_timeline(
+        &self,
+        username: &str,
+    ) -> Result<PublicTimeline<'_>, String> {
+        if !is_username(username) {
+            return Err("Enter a valid Instagram username".to_owned());
+        }
         let url = format!("{}/{username}/", self.origin);
         let response = self
             .http
@@ -61,33 +76,11 @@ impl InstagramClient {
         let body = read_public_response(response, TIMELINE_UNAVAILABLE).await?;
         let profile =
             public_profile_page(&body, username).ok_or_else(|| TIMELINE_UNAVAILABLE.to_owned())?;
-        let connection = if let Some(cursor) = cursor {
-            self.timeline_after(&url, &profile, cursor).await?
-        } else {
-            profile.first_page
-        };
-        let (mut posts, next_cursor) = timeline_posts(&connection, cursor)?;
-        let seen: HashSet<&str> = shown_codes.iter().map(String::as_str).collect();
-        posts.retain(|post| !seen.contains(post.code.as_str()));
-
-        let posts = stream::iter(posts.into_iter().map(|mut preview| async move {
-            match self.post(&preview.code).await {
-                Ok(post) => {
-                    preview.resources = post.resources;
-                    preview.taken_at = post.taken_at;
-                    preview.like_count = post.like_count;
-                    preview.comment_count = post.comment_count;
-                    preview.thumbnail_url = post.thumbnail_url.or(preview.thumbnail_url);
-                }
-                Err(error) if error == UNAVAILABLE => {}
-                Err(error) => return Err(error),
-            }
-            Ok(preview)
-        }))
-        .buffered(2)
-        .try_collect()
-        .await?;
-        Ok(TimelinePage { posts, next_cursor })
+        Ok(PublicTimeline {
+            client: self,
+            url,
+            profile,
+        })
     }
 
     async fn timeline_after(
@@ -138,6 +131,46 @@ impl InstagramClient {
     }
 }
 
+impl PublicTimeline<'_> {
+    pub(crate) async fn page(
+        &self,
+        cursor: Option<&str>,
+        seen: &HashSet<String>,
+    ) -> Result<TimelinePage, String> {
+        let continuation;
+        let connection = if let Some(cursor) = cursor {
+            continuation = self
+                .client
+                .timeline_after(&self.url, &self.profile, cursor)
+                .await?;
+            &continuation
+        } else {
+            &self.profile.first_page
+        };
+        let (mut posts, next_cursor) = timeline_posts(connection)?;
+        posts.retain(|post| !seen.contains(&post.code));
+
+        let posts = stream::iter(posts.into_iter().map(|mut preview| async move {
+            match self.client.post(&preview.code).await {
+                Ok(post) => {
+                    preview.resources = post.resources;
+                    preview.taken_at = post.taken_at;
+                    preview.like_count = post.like_count;
+                    preview.comment_count = post.comment_count;
+                    preview.thumbnail_url = post.thumbnail_url.or(preview.thumbnail_url);
+                }
+                Err(error) if error == UNAVAILABLE => {}
+                Err(error) => return Err(error),
+            }
+            Ok(preview)
+        }))
+        .buffered(2)
+        .try_collect()
+        .await?;
+        Ok(TimelinePage { posts, next_cursor })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,7 +217,7 @@ mod tests {
         }
         Mock::given(method("POST")).and(path("/api/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data":{"node":{"polaris_ordered_timeline_connection":connection(&["Oldest"], Some("next-1"))}}
+                "data":{"node":{"polaris_ordered_timeline_connection":connection(&["Oldest"], None)}}
             })))
             .expect(1).mount(&server).await;
 
@@ -290,10 +323,7 @@ fn valid_cursor(value: &str) -> bool {
         && !value.bytes().any(|b| b.is_ascii_control())
 }
 
-fn timeline_posts(
-    connection: &Value,
-    cursor: Option<&str>,
-) -> Result<(Vec<Post>, Option<String>), String> {
+fn timeline_posts(connection: &Value) -> Result<(Vec<Post>, Option<String>), String> {
     let edges = connection["edges"]
         .as_array()
         .filter(|edges| edges.len() <= MAX_PAGE_ITEMS)
@@ -323,10 +353,13 @@ fn timeline_posts(
         })
         .collect();
     let next_cursor = if connection["page_info"]["has_next_page"] == true {
-        connection["page_info"]["end_cursor"]
-            .as_str()
-            .filter(|next| valid_cursor(next) && Some(*next) != cursor)
-            .map(String::from)
+        Some(
+            connection["page_info"]["end_cursor"]
+                .as_str()
+                .filter(|next| valid_cursor(next))
+                .ok_or_else(|| TIMELINE_UNAVAILABLE.to_owned())?
+                .to_owned(),
+        )
     } else {
         None
     };

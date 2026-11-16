@@ -1,6 +1,6 @@
 [package]
 name = "insta-dl-gui"
-version = "0.8.0"
+version = "0.9.0"
 description = "Local desktop downloader for public Instagram embeds"
 authors = ["subzeroid"]
 edition = "2021"

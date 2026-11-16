@@ -4,6 +4,7 @@ A desktop Instagram downloader based on [insta-dl-gui](https://github.com/subzer
 
 - Paste a public post, Reel, or carousel link to download its exposed media.
 - Search an exact username to browse recent posts, then press **Load more** for older posts available in Instagram's public timeline. Download all loaded items, a filtered view, selected items, or the avatar.
+- Use **Download all public posts** for one Queue job that follows the public timeline automatically and saves each page as it goes.
 - Use Queue to view or cancel downloads and Library to browse the local archive. Settings controls the download folder, metadata sidecars, and proxy.
 
 Instagram controls which timeline pages and media it makes available to logged-out visitors. Stories, Highlights, follower lists and private content are outside this edition's scope.

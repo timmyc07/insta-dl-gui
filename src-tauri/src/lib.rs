@@ -328,6 +328,7 @@ pub fn run() {
             commands::check_download_statuses,
             commands::enqueue_profile_download,
             commands::enqueue_fetched_post_download,
+            commands::enqueue_public_archive,
             commands::cancel_job,
             commands::download_direct,
             library_commands::ensure_configured_library_root,

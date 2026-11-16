@@ -7,6 +7,7 @@ import {
   downloadDirect,
   downloadPost,
   enqueueFetchedPostDownload,
+  enqueuePublicArchive,
   fetchProfile,
   fetchProfilePostsPage,
   resolveInput,
@@ -381,6 +382,29 @@ function isCurrentProfileSession(session: symbol, username: string, profilePk: s
   );
 }
 
+async function downloadPublicArchive() {
+  const profile = preview.value?.profile;
+  if (!profile) return;
+  const session = profileSession;
+  const conflictKeys = downloadConflictKeys(profile.username, "all");
+  await runWithDownloadConflicts(conflictKeys, conflictKeys, async (reservationToken) => {
+    error.value = null;
+    try {
+      const id = await enqueuePublicArchive(profile.username);
+      jobs.transferConflictReservation(
+        reservationToken,
+        id,
+        `@${profile.username} · all public posts`,
+        conflictKeys,
+      );
+    } catch (cause) {
+      if (isCurrentProfileSession(session, profile.username, profile.pk)) {
+        error.value = String(cause);
+      }
+    }
+  });
+}
+
 async function downloadSnapshot(scope: FetchedPostScope) {
   const profile = preview.value?.profile;
   if (!profile) return;
@@ -623,7 +647,16 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <p class="text-sm text-slate-400" aria-live="polite">{{ sourcePosts.length }} public posts loaded</p>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm text-slate-400" aria-live="polite">{{ sourcePosts.length }} public posts loaded</p>
+        <button
+          v-if="preview.profile.media_count > 0 || sourcePosts.length > 0"
+          type="button"
+          class="btn-primary"
+          :disabled="activeGroupBusy"
+          @click="downloadPublicArchive"
+        >Download all public posts</button>
+      </div>
       <!-- Explore controls -->
       <div class="space-y-2">
         <div data-explorer-toolbar class="flex flex-wrap items-center gap-x-2 gap-y-2">

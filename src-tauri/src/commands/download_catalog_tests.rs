@@ -1024,6 +1024,105 @@ fn resource(server: &MockServer, route: &str, kind: MediaKind) -> MediaResource 
     }
 }
 
+#[tokio::test]
+async fn public_archive_follows_pages_and_reuses_cataloged_files() {
+    use serde_json::json;
+    let server = MockServer::start().await;
+    let first = json!({
+        "edges":[{"node":{"pk":"100","code":"FIRST"}}],
+        "page_info":{"has_next_page":true,"end_cursor":"second"}
+    });
+    let html = format!(
+        r#"
+        <script>["LSD",[],{{"token":"guest-nonce"}}]</script>
+        <script type="application/json">{}</script>"#,
+        json!({"require": [
+            {"__bbox":{"result":{"data":{"xig_user_by_username":{"username":"nike","is_private":false}}}}},
+            {"__bbox":{"result":{"data":{"xig_user_by_username":{"id":"owner","polaris_ordered_timeline_connection":first}}}}}
+        ]})
+    );
+    Mock::given(path("/nike/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(html))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data":{"node":{"polaris_ordered_timeline_connection":{
+                "edges":[{"node":{"pk":"100","code":"FIRST"}},{"node":{"pk":"200","code":"OLDER"}}],
+                "page_info":{"has_next_page":false}
+            }}}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    for (pk, code) in [("100", "FIRST"), ("200", "OLDER")] {
+        let media = format!(
+            r#"<div data-media-type="GraphImage" data-media-id="{pk}"
+            data-permalink="https://www.instagram.com/p/{code}/">
+            <img class="EmbeddedMediaImage" src="https://scontent.cdninstagram.com/{code}.jpg">
+            </div>"#
+        );
+        Mock::given(path(format!("/p/{code}/embed/")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(media))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let fixture = Fixture::new();
+    mount_media(&server, "/seed-first", "image/jpeg", &JPEG).await;
+    mount_media(&server, "/seed-older", "image/jpeg", &JPEG).await;
+    let seeded = [
+        post(
+            "100",
+            "FIRST",
+            vec![resource(&server, "/seed-first", MediaKind::Photo)],
+        ),
+        post(
+            "200",
+            "OLDER",
+            vec![resource(&server, "/seed-older", MediaKind::Photo)],
+        ),
+    ];
+    assert!(fixture
+        .run_fetched_posts(&seeded, false, &NoopProgress, None)
+        .await
+        .is_ok());
+    let instagram = crate::instagram::InstagramClient::with_origin(&server.uri(), None).unwrap();
+    let (_sender, cancel) = tokio::sync::watch::channel(false);
+    let cfg = Config {
+        sidecar: false,
+        ..Config::default()
+    };
+    let progress = RecordingProgress::default();
+    let result = public_archive::run(
+        &instagram,
+        "nike",
+        &fixture.http,
+        &fixture.catalog,
+        &fixture.root,
+        &cfg,
+        &progress,
+        &fixture.root.join("nike/posts"),
+        cancel,
+        true,
+    )
+    .await;
+    let completed = match result {
+        Ok(completed) => completed,
+        Err(JobFail::Fatal(error)) => panic!("archive failed: {error}"),
+        Err(JobFail::Cancelled) => panic!("archive was cancelled"),
+    };
+    assert_eq!(completed.requested_items, Some(2));
+    assert_eq!(completed.outcome.files_written, 0);
+    assert_eq!(fixture.all_items().len(), 2);
+    assert!(completed.resource_errors.is_empty());
+    let updates = progress.updates();
+    assert_eq!(updates.last().map(|update| update.0), Some(2));
+    assert!(updates.windows(2).all(|pair| pair[0].2 <= pair[1].2));
+}
+
 fn post(pk: &str, code: &str, resources: Vec<MediaResource>) -> Post {
     Post {
         pk: pk.into(),

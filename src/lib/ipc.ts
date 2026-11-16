@@ -361,6 +361,10 @@ export async function enqueueProfileDownload(username: string, opts: ProfileOpti
   return invoke("enqueue_profile_download", { username, opts });
 }
 
+export async function enqueuePublicArchive(username: string): Promise<string> {
+  return invoke("enqueue_public_archive", { username });
+}
+
 export async function enqueueFetchedPostDownload(
   username: string,
   category: FetchedPostCategory,

@@ -25,7 +25,7 @@ impl InstagramClient {
         Self::with_origin(INSTAGRAM, proxy)
     }
 
-    fn with_origin(origin: &str, proxy: Option<&str>) -> Result<Self, String> {
+    pub(crate) fn with_origin(origin: &str, proxy: Option<&str>) -> Result<Self, String> {
         let builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .user_agent(concat!("insta-dl-gui-local/", env!("CARGO_PKG_VERSION")))
