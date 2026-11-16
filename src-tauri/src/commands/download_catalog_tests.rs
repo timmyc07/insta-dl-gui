@@ -1849,8 +1849,9 @@ async fn persists_the_exact_collision_adjusted_downloader_path() {
     assert!(slow_response_started, "slow mock response never started");
     let mut reservation_visible = false;
     for _ in 0..200 {
-        reservation_visible = fs::read_dir(requested_base.parent().unwrap())
-            .unwrap()
+        reservation_visible = fs::read_dir(requested_base.with_file_name("images"))
+            .into_iter()
+            .flatten()
             .flatten()
             .any(|entry| entry.path().extension().is_some_and(|ext| ext == "part"));
         if reservation_visible {
@@ -1916,7 +1917,7 @@ async fn carousel_is_one_item_with_resource_position_ordinals() {
         ],
     );
 
-    let result = fixture.run(&item, false).await;
+    let result = fixture.run(&item, true).await;
 
     assert_eq!(result.outcome.files_written, 3);
     assert!(result.resource_errors.is_empty());
@@ -1941,8 +1942,32 @@ async fn carousel_is_one_item_with_resource_position_ordinals() {
             (0, MediaFileKind::Photo),
             (1, MediaFileKind::Video),
             (2, MediaFileKind::Photo),
+            (3, MediaFileKind::Metadata),
         ]
     );
+    let folders: Vec<_> = detail
+        .files
+        .iter()
+        .map(|file| {
+            Path::new(&file.relative_path)
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(folders, ["images", "videos", "images", "metadata"]);
+    let root = fixture.catalog.list_roots().unwrap().remove(0);
+    let discovery = crate::scanner::discover_archive(root.id, &root.path).unwrap();
+    assert_eq!(discovery.groups.len(), 1);
+    let group = &discovery.groups[0];
+    assert_eq!(group.remote_key, detail.remote_key);
+    assert_eq!(group.item.caption, detail.caption);
+    assert_eq!(group.item.files.len(), 4);
+    let repeated = fixture.run(&item, true).await;
+    assert_eq!(repeated.outcome.files_written, 0);
+    assert!(repeated.resource_errors.is_empty());
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
 }
 
 #[tokio::test]
@@ -2217,7 +2242,7 @@ async fn direct_propic_round_trip_keeps_avatar_identity_and_file_link() {
     assert_eq!(downloaded.files.len(), 1);
     assert_eq!(
         downloaded.files[0].relative_path,
-        "owner/propic/avatar_445566.jpg"
+        "owner/propic/images/avatar_445566.jpg"
     );
 
     let root = fixture.catalog.list_roots().unwrap().remove(0);

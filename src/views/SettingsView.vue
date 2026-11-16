@@ -194,7 +194,7 @@ async function clearProxy() {
     <div class="card flex items-center justify-between p-5">
       <div>
         <div class="text-sm font-medium text-slate-300">Save JSON metadata</div>
-        <p class="text-xs text-slate-500">Writes a &lt;file&gt;.json sidecar with caption, likes and owner next to every post.</p>
+        <p class="text-xs text-slate-500">Saves a JSON file with caption, likes and owner in the metadata folder.</p>
       </div>
       <label class="relative inline-flex cursor-pointer items-center">
         <input

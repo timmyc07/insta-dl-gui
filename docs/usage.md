@@ -16,6 +16,8 @@ In **Explore**, enter a public profile and press **Download all public posts**. 
 
 ## Library
 
+New files are sorted inside their download folder. Photos go in `images/`, videos in `videos/`, and JSON sidecars in `metadata/`. The Library groups those files by post, including mixed-media carousels.
+
 Downloads appear in your local Library. Choose **Scan library** to import existing media from the configured download folder.
 
 ### Search and filters

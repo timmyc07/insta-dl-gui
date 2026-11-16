@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -331,8 +331,10 @@ fn existing_stems(dir: &Path) -> HashSet<String> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                set.insert(stem.to_string());
+            } else if media_file_kind_from_path(&path) != MediaFileKind::Unknown {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    set.insert(stem.to_string());
+                }
             }
         }
     }
@@ -378,9 +380,42 @@ fn write_sidecar(
             "item_kind": catalog_item.kind,
         },
     });
-    let path = dir.join(format!("{stem}.json"));
+    let metadata_dir = dir.join(crate::download_layout::METADATA);
+    std::fs::create_dir_all(&metadata_dir).map_err(|e| e.to_string())?;
+    let path = metadata_dir.join(format!("{stem}.json"));
     let json = serde_json::to_vec_pretty(&sidecar).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    let mut file = match std::fs::File::options()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            if read_post_sidecar(&path)
+                .as_ref()
+                .and_then(|value| value.get("pk"))
+                .and_then(serde_json::Value::as_str)
+                != Some(post.pk.as_str())
+            {
+                return Err("Metadata filename is already in use".to_owned());
+            }
+            let temporary = path.with_extension(format!("{}.part", uuid::Uuid::new_v4()));
+            let result =
+                std::fs::write(&temporary, &json).and_then(|()| std::fs::rename(&temporary, &path));
+            if result.is_err() {
+                let _ = std::fs::remove_file(&temporary);
+            }
+            result.map_err(|e| e.to_string())?;
+            return Ok(Some(path));
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let result = file.write_all(&json);
+    drop(file);
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&path);
+        return Err(error.to_string());
+    }
     Ok(Some(path))
 }
 
@@ -980,30 +1015,32 @@ fn recover_downloaded_file_blocking(
 }
 
 fn recover_sidecar(
+    dir: &Path,
     files: &[DownloadedFile],
     ordinal: u32,
     catalog_item: &CatalogItemMetadata,
 ) -> Option<DownloadedFile> {
     files.iter().find_map(|file| {
-        let path = file.path.with_extension("json");
-        (path.is_file() && sidecar_catalog_hint_matches(&path, catalog_item))
-            .then(|| downloaded_sidecar(path, ordinal).ok())
-            .flatten()
+        let adjacent = file.path.with_extension("json");
+        let classified = dir
+            .join(crate::download_layout::METADATA)
+            .join(adjacent.file_name()?);
+        [classified, adjacent].into_iter().find_map(|path| {
+            sidecar_catalog_hint_matches(&path, catalog_item)
+                .then(|| downloaded_sidecar(path, ordinal).ok())
+                .flatten()
+        })
     })
 }
 
-fn sidecar_catalog_hint_matches(path: &Path, catalog_item: &CatalogItemMetadata) -> bool {
+fn read_post_sidecar(path: &Path) -> Option<serde_json::Value> {
     const MAX_SIDECAR_BYTES: u64 = 4 * 1024 * 1024;
 
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if metadata.len() > MAX_SIDECAR_BYTES {
-        return false;
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_SIDECAR_BYTES {
+        return None;
     }
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
+    let file = std::fs::File::open(path).ok()?;
     let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
     if file
         .take(MAX_SIDECAR_BYTES + 1)
@@ -1011,9 +1048,13 @@ fn sidecar_catalog_hint_matches(path: &Path, catalog_item: &CatalogItemMetadata)
         .is_err()
         || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SIDECAR_BYTES
     {
-        return false;
+        return None;
     }
-    let Ok(sidecar) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn sidecar_catalog_hint_matches(path: &Path, catalog_item: &CatalogItemMetadata) -> bool {
+    let Some(sidecar) = read_post_sidecar(path) else {
         return false;
     };
     if sidecar.get("pk").and_then(serde_json::Value::as_str) != catalog_item.remote_pk.as_deref() {
@@ -1697,7 +1738,8 @@ async fn run_profile_job(
             let sidecar_ordinal = u32::try_from(total).unwrap_or(u32::MAX);
             let mut sidecar_written = false;
             if cfg.sidecar && !downloaded.is_empty() {
-                if let Some(sidecar) = recover_sidecar(&downloaded, sidecar_ordinal, &item_metadata)
+                if let Some(sidecar) =
+                    recover_sidecar(&posts_dir, &downloaded, sidecar_ordinal, &item_metadata)
                 {
                     downloaded.push(sidecar);
                 } else if let Some(first_file) = downloaded.first() {
@@ -1994,7 +2036,7 @@ async fn run_single_post_attempt(
     let sidecar_ordinal = u32::try_from(total).unwrap_or(u32::MAX);
     let mut sidecar_written = false;
     if cfg.sidecar && !downloaded.is_empty() {
-        if let Some(sidecar) = recover_sidecar(&downloaded, sidecar_ordinal, &item_metadata) {
+        if let Some(sidecar) = recover_sidecar(dir, &downloaded, sidecar_ordinal, &item_metadata) {
             downloaded.push(sidecar);
         } else if let Some(first_file) = downloaded.first() {
             match write_sidecar(cfg, dir, post, &first_file.path, &item_metadata) {

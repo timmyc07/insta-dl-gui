@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod cdn;
 pub mod commands;
 pub mod config;
+mod download_layout;
 pub mod instagram;
 pub mod jobs;
 pub mod library_commands;

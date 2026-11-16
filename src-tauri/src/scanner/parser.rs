@@ -38,7 +38,13 @@ pub(crate) fn parse_group_cancellable(
         if should_cancel() {
             return Err(ScanError::Cancelled);
         }
-        if extension_is(&file.relative_path, "json") {
+        if extension_is(&file.relative_path, "json") && sidecar_file.is_none() {
+            sidecar_file = Some(file);
+        }
+        if extension_is(&file.relative_path, "json")
+            && file.relative_path.parent().and_then(Path::file_name)
+                == Some(std::ffi::OsStr::new(crate::download_layout::METADATA))
+        {
             sidecar_file = Some(file);
             break;
         }
@@ -335,7 +341,7 @@ fn carousel_identity_path_cancellable(
         if extension_is(&file.relative_path, "json") {
             continue;
         }
-        let candidate_parent = file.relative_path.parent().unwrap_or_else(|| Path::new(""));
+        let candidate_parent = crate::download_layout::media_directory(&file.relative_path);
         let Some(stem) = file.relative_path.file_stem() else {
             return Ok(None);
         };

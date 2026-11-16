@@ -422,11 +422,7 @@ fn group_files_with_cancel(
         if should_cancel() {
             return Err(ScanError::Cancelled);
         }
-        let parent = file
-            .relative_path
-            .parent()
-            .unwrap_or_else(|| Path::new(""))
-            .to_path_buf();
+        let parent = crate::download_layout::media_directory(&file.relative_path).to_path_buf();
         let relative_path = file.relative_path.clone();
         if extension_is(&file.relative_path, "json") {
             metadata_by_directory

@@ -235,6 +235,7 @@ where
         cancel,
         DEFAULT_BYTE_BUDGET,
         false,
+        false,
     )
     .await
 }
@@ -264,6 +265,7 @@ where
         cancel,
         byte_budget,
         cfg!(test),
+        false,
     )
     .await
 }
@@ -278,6 +280,7 @@ async fn stream_to_file_with_budget_policy<F>(
     mut cancel: Option<tokio::sync::watch::Receiver<bool>>,
     byte_budget: u64,
     allow_loopback: bool,
+    classify: bool,
 ) -> Result<DownloadOutcome, CdnError>
 where
     F: FnMut(u64),
@@ -359,7 +362,19 @@ where
         }
     }
 
-    let reservation = reserve_collision(&dest_base.with_extension(kind.ext()));
+    let dest = if classify {
+        let folder = if matches!(kind, Sniffed::Mp4) {
+            crate::download_layout::VIDEOS
+        } else {
+            crate::download_layout::IMAGES
+        };
+        dest_base
+            .with_file_name(folder)
+            .join(dest_base.file_name().unwrap_or_default())
+    } else {
+        dest_base.to_path_buf()
+    };
+    let reservation = reserve_collision(&dest.with_extension(kind.ext()));
     let final_path = reservation.path().to_path_buf();
     if let Some(parent) = final_path.parent() {
         fs::create_dir_all(parent).map_err(CdnError::Io)?;
@@ -560,6 +575,7 @@ where
             cancel.clone(),
             DEFAULT_BYTE_BUDGET,
             allow_loopback,
+            true,
         )
         .await;
         match result {
